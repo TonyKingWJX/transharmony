@@ -123,4 +123,4 @@ interface TranslatorAdapter {
 
 ## License
 
-[Apache-2.0](LICENSE) © 2026 TransHarmony Contributors
+[Apache-2.0](LICENSE) © 2026 TonyKingWJX
