@@ -1,6 +1,6 @@
 # 鸿译 TransHarmony
 
-> HarmonyOS NEXT 原生 AI 翻译应用：免费通道开箱即翻、12 个翻译服务商可切换、多引擎聚合对比、BYOK 接入大模型、兼容 Bob 插件。
+> 鸿蒙（HarmonyOS NEXT）原生 AI 翻译应用：免费通道开箱即翻、12 个翻译服务商可切换、多引擎聚合对比、BYOK 接入大模型、支持 Bob 插件（后续将支持 Manggo 插件）。
 
 当前版本 **v1.0.1**，真机验证通过，持续迭代中。版本历史见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
@@ -12,7 +12,7 @@
 - **AI 翻译（BYOK）**：DeepSeek / GLM / 通义 / Kimi / Anthropic 预置，支持任意 OpenAI 兼容接口，自动获取模型列表，可自定义翻译 Prompt；译文润色、语法解释、多风格输出
 - **语音输入与朗读**：Core Speech Kit ASR（支持暂停 / 继续）+ TTS 朗读
 - **拍照翻译**：拍照 / 相册取图 → 端侧 OCR（Core Vision Kit）→ 自动翻译，照片即用即焚
-- **Bob 插件系统**：兼容 .bobplugin 插件（JSVM 沙盒运行时），插件即引擎，支持翻译 / OCR / TTS 类插件
+- **Bob 插件系统**：兼容 Bob 插件（.bobplugin，JSVM 沙盒运行时），插件即引擎，支持翻译 / OCR / TTS 类插件；**后续将支持 Manggo 插件**（.mplugin，ESM 规范）
 - **历史与收藏**：本地存储、搜索、语言对筛选、回收站（30 天软删除）、详情页、批量操作
 - **备份恢复**：历史 + 服务商配置 + 偏好整包 AES-256-GCM 加密（.htrans），免存储权限
 - **隐私与合规**：凭证存系统关键资产（Asset Store Kit）、敏感词 DFA 检测、AI 内容合规提示、权限最小化（仅 INTERNET / GET_NETWORK_INFO / MICROPHONE）
