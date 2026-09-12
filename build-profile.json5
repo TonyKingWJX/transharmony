@@ -1,0 +1,40 @@
+{
+  "app": {
+    // 签名配置不入库：请通过 DevEco Studio → File → Project Structure → Signing Configs
+    // 生成或配置签名，详见 README「签名配置」一节。请勿将证书路径与密钥密码提交到仓库。
+    "signingConfigs": [],
+    "products": [
+      {
+        "name": "default",
+        "targetSdkVersion": "6.1.1(24)",
+        "compatibleSdkVersion": "6.1.1(24)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "identifier": "com.transharmony.mock-ocr",
+  "version": "1.0.0",
+  "category": "ocr",
+  "name": "Mock OCR",
+  "summary": "内置测试插件（Bob 形态，验证 OCR 执行层管线）",
+  "author": "TransHarmony",
+  "homepage": "https://example.com",
+  "minBobVersion": "0.5.0",
+  "options": []
+}

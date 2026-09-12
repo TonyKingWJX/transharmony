@@ -1,0 +1,21 @@
+{
+  "modelVersion": "26.0.0",
+  "dependencies": {
+    "@ohos/hvigor": "6.26.4",
+    "@ohos/hvigor-ohos-plugin": "6.26.4"
+  },
+  "execution": {
+    // "analyze": "normal",
+    // "daemon": true,
+    // "incremental": true,
+    // "parallel": true,
+    // "typeCheck": false,
+    // "optimizationStrategy": "memory"
+  },
+  "logging": {
+  },
+  "debugging": {
+  },
+  "nodeOptions": {
+  }
+}

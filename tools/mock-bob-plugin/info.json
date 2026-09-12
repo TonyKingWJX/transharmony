@@ -1,0 +1,19 @@
+{
+  "identifier": "com.transharmony.mock",
+  "version": "1.0.0",
+  "category": "translate",
+  "name": "Mock翻译",
+  "summary": "内置测试插件（Bob 形态，验证 .bobplugin 安装管线）",
+  "author": "TransHarmony",
+  "homepage": "https://example.com",
+  "minBobVersion": "1.8.0",
+  "options": [
+    {
+      "identifier": "apiKey",
+      "type": "text",
+      "title": "API Key",
+      "defaultValue": "test-key-123",
+      "desc": "测试用密钥（默认值注入 $option）"
+    }
+  ]
+}

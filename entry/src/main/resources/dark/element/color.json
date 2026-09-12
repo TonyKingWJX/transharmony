@@ -1,0 +1,72 @@
+{
+  "color": [
+    {
+      "name": "start_window_background",
+      "value": "#191A1C"
+    },
+    {
+      "name": "brand",
+      "value": "#317AF7"
+    },
+    {
+      "name": "font_primary",
+      "value": "#E5FFFFFF"
+    },
+    {
+      "name": "font_secondary",
+      "value": "#99FFFFFF"
+    },
+    {
+      "name": "font_tertiary",
+      "value": "#66FFFFFF"
+    },
+    {
+      "name": "font_fourth",
+      "value": "#33FFFFFF"
+    },
+    {
+      "name": "bg_page",
+      "value": "#191A1C"
+    },
+    {
+      "name": "card_bg",
+      "value": "#202224"
+    },
+    {
+      "name": "bg_container",
+      "value": "#1AFFFFFF"
+    },
+    {
+      "name": "divider",
+      "value": "#33FFFFFF"
+    },
+    {
+      "name": "emphasize_bg",
+      "value": "#33317AF7"
+    },
+    {
+      "name": "emphasize_bg_light",
+      "value": "#19317AF7"
+    },
+    {
+      "name": "confirm",
+      "value": "#5BA854"
+    },
+    {
+      "name": "warning",
+      "value": "#D94838"
+    },
+    {
+      "name": "mat_line",
+      "value": "#1FFFFFFF"
+    },
+    {
+      "name": "pill_bg",
+      "value": "#66202224"
+    },
+    {
+      "name": "fade_from",
+      "value": "#00191A1C"
+    }
+  ]
+}

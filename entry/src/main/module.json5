@@ -1,0 +1,73 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "deliveryWithInstall": true,
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": [
+      "phone",
+      "tablet"
+    ],
+    "pages": "$profile:main_pages",
+    // 隐私托管（标准化隐私声明托管服务）调试预置：
+    // 仅在应用未上架、真机 hdc 安装调试时生效，用于弹出系统标准隐私弹框并支持 privacyManager 接口调试。
+    // 上架后由 AGC「标准化隐私声明托管服务」配置接管，届时 URL 需替换为真实可访问的 https 页面。
+    "metadata": [
+      {
+        "name": "appgallery_privacy_hosted",
+        "value": "1"
+      },
+      {
+        // TODO 上架前替换：隐私政策页面（https 静态页，建议用 AGC 隐私声明托管模板生成）
+        "name": "appgallery_privacy_link_privacy_statement",
+        "value": "https://www.example.com/privacy.html"
+      },
+      {
+        // TODO 上架前替换：用户协议页面
+        "name": "appgallery_privacy_link_user_agreement",
+        "value": "https://www.example.com/user-agreement.html"
+      }
+    ],
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.GET_NETWORK_INFO"
+      },
+      {
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:microphone_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      }
+    ],
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:layered_image",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:start_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": [
+              "entity.system.home"
+            ],
+            "actions": [
+              "ohos.want.action.home"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

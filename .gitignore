@@ -1,0 +1,24 @@
+# 构建产物与依赖
+node_modules/
+oh_modules/
+**/oh_modules/
+**/build/
+**/.cxx/
+**/.preview/
+**/.test/
+**/.hvigor/
+/.hvigor/
+
+# IDE 与本地工具
+.idea/
+.local/
+/.clang-format
+/.clang-tidy
+/.appanalyzer/
+/.zcode/
+/.cache/
+/.tmp-crops/
+
+# 系统
+.DS_Store
+*.log

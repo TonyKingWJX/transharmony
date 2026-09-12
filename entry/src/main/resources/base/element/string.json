@@ -1,0 +1,64 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "鸿译主模块"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "鸿译翻译主入口"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "鸿译"
+    },
+    {
+      "name": "tab_translate",
+      "value": "翻译"
+    },
+    {
+      "name": "tab_history",
+      "value": "历史"
+    },
+    {
+      "name": "tab_settings",
+      "value": "我的"
+    },
+    {
+      "name": "input_hint",
+      "value": "输入要翻译的文本"
+    },
+    {
+      "name": "translate_btn",
+      "value": "翻译"
+    },
+    {
+      "name": "copy_done",
+      "value": "已复制"
+    },
+    {
+      "name": "empty_history",
+      "value": "暂无翻译记录"
+    },
+    {
+      "name": "engine_title",
+      "value": "翻译引擎"
+    },
+    {
+      "name": "clear_history",
+      "value": "清空历史"
+    },
+    {
+      "name": "history_title",
+      "value": "翻译历史"
+    },
+    {
+      "name": "settings_title",
+      "value": "设置"
+    },
+    {
+      "name": "microphone_reason",
+      "value": "语音输入功能需要使用麦克风录制并识别您说的话"
+    }
+  ]
+}

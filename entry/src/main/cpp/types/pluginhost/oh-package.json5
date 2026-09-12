@@ -1,0 +1,6 @@
+{
+  "name": "libpluginhost.so",
+  "types": "./index.d.ts",
+  "version": "",
+  "description": "JS 插件宿主 native 模块类型声明"
+}

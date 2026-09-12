@@ -1,0 +1,11 @@
+{
+  "name": "entry",
+  "version": "1.0.1",
+  "description": "译鸿主模块",
+  "main": "",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "libpluginhost.so": "file:./src/main/cpp/types/pluginhost"
+  }
+}

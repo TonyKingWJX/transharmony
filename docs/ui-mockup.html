@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>译鸿 TransHarmony · UI 设计稿 v0.2（对齐鸿蒙官方设计规范）</title>
+<style>
+  /* ═══ 色彩 Token —— 全部取自 design-guides.md「系统基础与语义 Token 全量表」 ═══ */
+  :root{
+    --brand:#0A59F7;                 /* brand · light */
+    --brand-20:rgba(10,89,247,.20);  /* comp_emphasize_secondary */
+    --brand-10:rgba(10,89,247,.10);  /* comp_emphasize_tertiary */
+    --font-1:rgba(0,0,0,.90);        /* font_primary  #e5000000 */
+    --font-2:rgba(0,0,0,.60);        /* font_secondary #99000000 */
+    --font-3:rgba(0,0,0,.40);        /* font_tertiary  #66000000 */
+    --font-4:rgba(0,0,0,.20);        /* font_fourth    #33000000 */
+    --bg-page:#F1F3F5;               /* background_secondary · 雪域灰 */
+    --bg-card:#FFFFFF;               /* comp_background_primary */
+    --bg-gray:#F1F3F5;               /* comp_background_gray */
+    --bg-container:rgba(0,0,0,.10);  /* comp_background_secondary 组件容器 */
+    --divider:rgba(0,0,0,.20);       /* comp_divider */
+    --confirm:#64BB5C;
+    --warning:#E84026;
+    --mat:rgba(255,255,255,.72);     /* 沉浸光感材质（浅） */
+    --mat-line:rgba(255,255,255,.65);
+    --ai-grad:linear-gradient(135deg,#7B5CFF 0%,#0A59F7 100%);
+    --shadow:0 10px 30px rgba(0,0,0,.08);
+  }
+  html[data-theme="dark"]{
+    --brand:#317AF7;                 /* brand · dark */
+    --brand-20:rgba(49,122,247,.20);
+    --brand-10:rgba(49,122,247,.10);
+    --font-1:rgba(255,255,255,.90);
+    --font-2:rgba(255,255,255,.60);
+    --font-3:rgba(255,255,255,.40);
+    --font-4:rgba(255,255,255,.20);
+    --bg-page:#191A1C;               /* background_secondary · dark */
+    --bg-card:#202224;               /* comp_background_primary · dark */
+    --bg-gray:#1A1B1D;
+    --bg-container:rgba(255,255,255,.10);
+    --divider:rgba(255,255,255,.20);
+    --mat:rgba(32,34,36,.72);
+    --mat-line:rgba(255,255,255,.08);
+    --shadow:0 10px 30px rgba(0,0,0,.5);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-font-smoothing:antialiased}
+  body{
+    font-family:-apple-system,"HarmonyOS Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    background:var(--bg-page);color:var(--font-1);transition:background .3s,color .3s;
+  }
+
+  /* ===== 页面头 ===== */
+  .page-head{max-width:1360px;margin:0 auto;padding:40px 32px 8px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:16px}
+  .page-head h1{font-size:26px;letter-spacing:.5px}
+  .page-head h1 small{font-size:14px;color:var(--font-2);font-weight:400;margin-left:10px}
+  .page-head p{color:var(--font-2);font-size:13px;margin-top:8px;max-width:760px;line-height:1.7}
+  .theme-toggle{
+    display:flex;align-items:center;gap:8px;background:var(--bg-card);border:1px solid var(--divider);
+    padding:8px 16px;border-radius:999px;cursor:pointer;font-size:13px;color:var(--font-1);box-shadow:var(--shadow);user-select:none;
+  }
+  .theme-toggle .dot{width:8px;height:8px;border-radius:50%;background:var(--brand)}
+
+  /* ===== 规范对齐说明 ===== */
+  .tokens{max-width:1360px;margin:24px auto 0;padding:0 32px;display:flex;gap:10px;flex-wrap:wrap}
+  .token{background:var(--bg-card);border:1px solid var(--divider);border-radius:14px;padding:11px 15px;display:flex;align-items:center;gap:9px;font-size:12px;color:var(--font-2)}
+  .token b{color:var(--font-1);font-weight:600;font-size:12px}
+  .token code{font-size:11px;background:var(--bg-container);border-radius:6px;padding:2px 6px;color:var(--font-2)}
+  .swatch{width:20px;height:20px;border-radius:6px;border:1px solid var(--divider)}
+
+  /* ===== 手机画布 ===== */
+  .canvas{max-width:1360px;margin:36px auto 80px;padding:0 32px;display:flex;gap:34px;flex-wrap:wrap;justify-content:center}
+  .screen-wrap{display:flex;flex-direction:column;align-items:center;gap:14px}
+  .screen-label{font-size:14px;font-weight:600}
+  .screen-label span{color:var(--font-3);font-weight:400;font-size:12px;margin-left:8px}
+
+  .phone{width:340px;height:720px;border-radius:44px;background:#101216;padding:10px;box-shadow:0 24px 60px rgba(0,0,0,.28);position:relative;flex-shrink:0}
+  .phone .hole{position:absolute;top:22px;left:50%;transform:translateX(-50%);width:11px;height:11px;border-radius:50%;background:#101216;z-index:40;box-shadow:0 0 0 2px rgba(255,255,255,.05)}
+  .viewport{width:100%;height:100%;border-radius:35px;overflow:hidden;background:var(--bg-page);display:flex;flex-direction:column;position:relative}
+
+  /* 状态栏（避让挖孔） */
+  .statusbar{height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 22px 0 26px;font-size:12px;font-weight:600;color:var(--font-1);position:relative;z-index:10}
+  .statusbar .right{display:flex;gap:5px;align-items:center}
+  .sig{display:flex;gap:2px;align-items:flex-end}
+  .sig i{width:3px;background:var(--font-1);border-radius:1px;display:block}
+  .batt{width:20px;height:10px;border:1px solid var(--font-2);border-radius:3px;position:relative}
+  .batt::after{content:"";position:absolute;inset:1.5px;right:5px;background:var(--font-1);border-radius:1px}
+
+  /* 标题栏：大标题左置 + 圆形按钮（≤3 个），沉浸光感渐变模糊材质 */
+  .navbar{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:4px 20px 10px;position:relative;z-index:10}
+  .navbar::after{content:"";position:absolute;left:0;right:0;bottom:-14px;height:14px;background:linear-gradient(var(--bg-page),transparent);pointer-events:none}
+  .navbar .title{font-size:22px;font-weight:700;letter-spacing:.3px}
+  .navbar .title em{font-style:normal;color:var(--brand)}
+  .navbar .title small{font-size:12px;font-weight:400;color:var(--font-3);margin-left:8px}
+  .nav-btn{width:36px;height:36px;border-radius:50%;background:var(--bg-card);border:1px solid var(--divider);display:flex;align-items:center;justify-content:center;color:var(--font-2);box-shadow:0 2px 8px rgba(0,0,0,.05)}
+  .nav-group{display:flex;gap:8px}
+
+  /* ═══ 悬浮式底部页签：胶囊 248×56vp（3 页签固定宽）· 沉浸光感模糊材质 ═══ */
+  .float-tab{
+    position:absolute;bottom:24px;left:50%;transform:translateX(-50%);width:248px;height:56px;border-radius:28px;
+    display:flex;z-index:30;
+    background:var(--mat);
+    -webkit-backdrop-filter:blur(24px) saturate(1.8);backdrop-filter:blur(24px) saturate(1.8);
+    border:1px solid var(--mat-line);
+    box-shadow:0 12px 32px rgba(0,0,0,.16);
+  }
+  .ft-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:10px;color:var(--font-3);letter-spacing:1px}
+  .ft-item.active{color:var(--brand);font-weight:600}
+  .ft-item svg{width:21px;height:21px}
+  /* 渐变蒙层：内容与悬浮页签间的过渡，比页签顶边高 16px、与页面背景同色 */
+  .tab-fade{position:absolute;bottom:80px;left:0;right:0;height:40px;background:linear-gradient(transparent,var(--bg-page) 85%);z-index:20;pointer-events:none}
+  /* 系统手势导航条 */
+  .gesture{position:absolute;bottom:7px;left:50%;transform:translateX(-50%);width:110px;height:4px;border-radius:2px;background:var(--font-3);z-index:40;pointer-events:none}
+
+  .content{flex:1;overflow:hidden;padding:2px 16px 100px;display:flex;flex-direction:column;gap:11px}
+
+  /* ===== 通用卡片（comp_background_primary + comp_divider）===== */
+  .card{background:var(--bg-card);border-radius:20px;border:1px solid var(--divider)}
+
+  /* 语言选择器 */
+  .lang-bar{display:flex;align-items:center;gap:8px;padding:11px 14px}
+  .lang-pill{flex:1;text-align:center;font-size:14px;font-weight:600;padding:5px 0;color:var(--font-1)}
+  .lang-pill small{display:block;font-size:10px;color:var(--font-3);font-weight:400;margin-top:1px}
+  .swap{width:32px;height:32px;border-radius:50%;background:var(--brand-10);color:var(--brand);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+
+  /* 引擎胶囊（组件容器色 comp_background_secondary） */
+  .engines{display:flex;gap:8px}
+  .engine{flex:1;text-align:center;font-size:12px;font-weight:600;padding:8px 0;border-radius:999px;background:var(--bg-container);color:var(--font-2)}
+  .engine.on{background:var(--brand);color:#fff}
+  .engine.ai.on{background:var(--ai-grad)}
+
+  /* 输入卡 */
+  .input-card{padding:14px 16px 10px;min-height:140px;display:flex;flex-direction:column}
+  .input-card .txt{font-size:16px;line-height:1.6;flex:1;color:var(--font-1)}
+  .input-card .tools{display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--divider);padding-top:9px;margin-top:10px}
+  .input-card .tools .l{display:flex;gap:15px;color:var(--font-3)}
+  .icon-btn{display:flex;align-items:center;gap:4px;font-size:11px}
+  .count{font-size:11px;color:var(--font-4)}
+  .dis{opacity:.35}
+
+  /* 译文卡 */
+  .result-card{padding:15px 16px}
+  .tag-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .tag{font-size:10px;padding:3px 9px;border-radius:999px;background:var(--brand-10);color:var(--brand);font-weight:600}
+  .tag.gray{background:var(--bg-container);color:var(--font-3)}
+  .result-card .trans{font-size:16.5px;line-height:1.65;font-weight:500}
+  .result-card .acts{display:flex;gap:17px;margin-top:13px;color:var(--font-2);align-items:center}
+  .caret{display:inline-block;width:2px;height:16px;background:var(--brand);vertical-align:-3px;margin-left:2px;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* AI 卡 */
+  .ai-card{border:1.5px solid var(--brand-20)}
+  .ai-badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;padding:3px 10px;border-radius:999px;color:#fff;background:var(--ai-grad)}
+  .chips{display:flex;gap:7px;flex-wrap:wrap}
+  .chip{font-size:11px;padding:6px 12px;border-radius:999px;background:var(--bg-container);color:var(--font-2)}
+  .chip.on{background:var(--brand-10);border:1px solid var(--brand);color:var(--brand);font-weight:600}
+  .chip.on.plain{border:none}
+  .explain{margin-top:12px;background:var(--brand-10);border-radius:14px;padding:10px 12px;font-size:11.5px;line-height:1.7;color:var(--font-2)}
+  .explain b{color:var(--font-1);font-size:11px;display:flex;align-items:center;gap:5px;margin-bottom:4px}
+  .foot-note{font-size:10px;color:var(--font-3);text-align:center;margin-top:-1px}
+
+  /* 聚合卡 */
+  .compare .col{padding:13px 15px}
+  .compare .col+.col{border-top:1px solid var(--divider)}
+  .compare .who{font-size:11px;font-weight:600;color:var(--font-2);display:flex;align-items:center;gap:6px;margin-bottom:5px}
+  .compare .who .win{margin-left:auto;font-size:9.5px;color:var(--confirm);background:rgba(100,187,92,.15);padding:2px 8px;border-radius:999px}
+  .compare .who .adopt{margin-left:auto;font-size:9.5px;color:var(--brand);border:1px solid var(--brand);padding:2px 9px;border-radius:999px}
+  .compare .val{font-size:13.5px;line-height:1.6}
+  .score{font-size:9.5px;color:var(--font-3);margin-top:5px}
+
+  /* 历史列表 */
+  .search{display:flex;align-items:center;gap:8px;background:var(--bg-card);border:1px solid var(--divider);border-radius:999px;padding:9px 14px;color:var(--font-3);font-size:13px}
+  .hist .src{font-size:13.5px;font-weight:500;line-height:1.45;color:var(--font-1)}
+  .hist .dst{font-size:13px;color:var(--font-2);line-height:1.45;margin-top:3px}
+  .hist .meta{display:flex;gap:8px;align-items:center;font-size:10px;color:var(--font-3);margin-top:5px}
+  .hist .meta .pill{border:1px solid var(--divider);border-radius:999px;padding:1px 7px}
+  .hist .star{margin-left:auto;color:#E8A123}
+  .hist-item{padding:12px 15px}
+  .hist-item+.hist-item{border-top:1px solid var(--divider)}
+
+  /* 分段控件 */
+  .seg{display:flex;background:var(--bg-container);border-radius:999px;padding:3px}
+  .seg div{flex:1;text-align:center;font-size:12px;font-weight:600;padding:7px 0;border-radius:999px;color:var(--font-2)}
+  .seg div.on{background:var(--bg-card);color:var(--font-1)}
+
+  /* 设置 */
+  .group{background:var(--bg-card);border-radius:20px;border:1px solid var(--divider);overflow:hidden}
+  .row{display:flex;align-items:center;gap:12px;padding:13px 15px;font-size:13.5px;color:var(--font-1)}
+  .row+.row{border-top:1px solid var(--divider)}
+  .row .ic{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#fff;font-size:12px}
+  .row .sub{font-size:10.5px;color:var(--font-3);margin-top:2px}
+  .row .tail{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--font-3);font-size:12px}
+  .ok{color:var(--confirm);font-size:11px;font-weight:600}
+  .switch{width:40px;height:22px;border-radius:999px;background:var(--brand);position:relative;flex-shrink:0}
+  .switch::after{content:"";position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+
+  /* ═══ 半模态面板：拖拽条 + 关闭按钮 + 沉浸光感材质，内部容器不透明度 ≤60% ═══ */
+  .sheet-dim{position:absolute;inset:0;background:rgba(0,0,0,.4);z-index:25}
+  .sheet{
+    position:absolute;left:0;right:0;bottom:0;z-index:30;border-radius:24px 24px 0 0;
+    background:var(--mat);
+    -webkit-backdrop-filter:blur(28px) saturate(1.8);backdrop-filter:blur(28px) saturate(1.8);
+    border-top:1px solid var(--mat-line);
+    padding:10px 16px 84px;
+  }
+  .sheet .grab{width:36px;height:4px;border-radius:2px;background:var(--font-4);margin:0 auto 6px}
+  .sheet .sh-head{display:flex;align-items:center;justify-content:space-between;margin:8px 2px 12px}
+  .sheet .sh-head .t{font-size:17px;font-weight:700}
+  .sheet .close{width:28px;height:28px;border-radius:50%;background:var(--bg-container);display:flex;align-items:center;justify-content:center;color:var(--font-2)}
+  .eng-row{display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:16px;background:rgba(255,255,255,.45);margin-bottom:8px}
+  html[data-theme="dark"] .eng-row{background:rgba(255,255,255,.06)}
+  .eng-row.sel{background:var(--brand-10);border:1px solid var(--brand)}
+  .eng-row .ic{width:34px;height:34px;border-radius:11px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;flex-shrink:0}
+  .eng-row .nm{font-size:14px;font-weight:600;color:var(--font-1)}
+  .eng-row .ds{font-size:10.5px;color:var(--font-3);margin-top:2px}
+  .radio{margin-left:auto;width:20px;height:20px;border-radius:50%;border:2px solid var(--font-4);flex-shrink:0}
+  .radio.on{border-color:var(--brand);background:radial-gradient(circle,var(--brand) 0 45%,transparent 50%)}
+
+  svg{flex-shrink:0}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <div>
+    <h1>译鸿 <em style="font-style:normal;color:var(--brand)">TransHarmony</em><small>UI 设计稿 v0.2 · 对齐鸿蒙官方设计规范（huawei-docs/design-guides）</small></h1>
+    <p>依据知识库《设计指导》重设计：色彩全部引用官方语义 Token（brand #0A59F7 / 雪域灰 #F1F3F5 / 文本四阶透明度）；底部页签采用<b>悬浮式胶囊页签</b>（3 页签固定宽 248×56vp、沉浸光感模糊材质、页签 2 字、未选中置灰）；标题栏大标题左置 + 圆形按钮；内容与页签间按规范加 16vp 同色渐变蒙层；新增<b>半模态面板</b>示例（拖拽条 + 关闭按钮，面板内容器不透明度 ≤60%）；底部避让系统手势导航条。共 6 屏，右上角可切换深色模式（暗色 Token 同步切换）。</p>
+  </div>
+  <div class="theme-toggle" onclick="toggleTheme()"><span class="dot"></span><span id="themeLabel">深色模式预览</span></div>
+</div>
+
+<div class="tokens">
+  <div class="token"><div class="swatch" style="background:#0A59F7"></div><div><b>brand</b> <code>#0A59F7 / 暗 #317AF7</code></div></div>
+  <div class="token"><div class="swatch" style="background:#F1F3F5"></div><div><b>雪域灰背景</b> <code>#F1F3F5 / 暗 #191A1C</code></div></div>
+  <div class="token"><div class="swatch" style="background:#202224"></div><div><b>卡片 · 暗</b> <code>#202224</code></div></div>
+  <div class="token"><div class="swatch" style="background:rgba(0,0,0,.9)"></div><div><b>font_primary</b> <code>黑 90%</code></div></div>
+  <div class="token"><div class="swatch" style="background:rgba(0,0,0,.6)"></div><div><b>font_secondary</b> <code>黑 60%</code></div></div>
+  <div class="token"><div class="swatch" style="background:rgba(10,89,247,.2)"></div><div><b>高亮背景 20%</b> <code>comp_emphasize_secondary</code></div></div>
+  <div class="token"><div><b>悬浮页签</b> 248×56vp · 3 页签固定宽</div></div>
+  <div class="token"><div><b>材质</b> 沉浸光感 blur(24px)</div></div>
+  <div class="token"><div><b>页签文字</b> 2 字 · 未选中置灰</div></div>
+</div>
+
+<div class="canvas">
+
+  <!-- ═══════════ ① 基础翻译 ═══════════ -->
+  <div class="screen-wrap">
+    <div class="screen-label">① 基础翻译 <span>输入即译 · 引擎胶囊</span></div>
+    <div class="phone"><div class="hole"></div><div class="viewport">
+      <div class="statusbar"><span>9:41</span><div class="right"><div class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></div><div class="batt"></div></div></div>
+      <div class="navbar">
+        <div class="title">翻译<small>译鸿</small></div>
+        <div class="nav-group">
+          <div class="nav-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 3v6h6"/></svg></div>
+          <div class="nav-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+        </div>
+      </div>
+      <div class="content">
+        <div class="card lang-bar">
+          <div class="lang-pill">自动检测<small>已识别：中文</small></div>
+          <div class="swap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M7 16H3m0 0 4-4m-4 4 4 4M17 4v16m0 0 4-4m-4 4-4-4"/></svg></div>
+          <div class="lang-pill">English<small>英语</small></div>
+        </div>
+        <div class="engines">
+          <div class="engine on">腾讯云</div>
+          <div class="engine">百度</div>
+          <div class="engine ai">✦ AI</div>
+          <div class="engine">聚合</div>
+        </div>
+        <div class="card input-card">
+          <div class="txt">科技的进步让跨语言交流变得越来越简单。</div>
+          <div class="tools">
+            <div class="l">
+              <span class="icon-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 18v-6m0 0a3 3 0 1 0-3-3M12 12a3 3 0 1 1 3-3M5 21h14M5 21a9 9 0 0 1 14 0"/></svg>朗读</span>
+              <span class="icon-btn dis"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3"/></svg>语音</span>
+              <span class="icon-btn dis"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>拍照</span>
+            </div>
+            <span class="count">19/2000</span>
+          </div>
+        </div>
+        <div class="card result-card">
+          <div class="tag-row"><span class="tag">中 → 英</span><span class="tag gray">0.8s</span></div>
+          <div class="trans">Technological advances are making cross-lingual communication easier and easier.</div>
+          <div class="acts">
+            <span class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>复制</span>
+            <span class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>重译</span>
+            <span class="icon-btn" style="margin-left:auto;color:var(--font-3)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></span>
+          </div>
+        </div>
+        <div class="foot-note">本月免费额度剩余 486 万字符 · 腾讯云</div>
+      </div>
+      <div class="tab-fade"></div>
+      <div class="float-tab">
+        <div class="ft-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg>翻译</div>
+        <div class="ft-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>历史</div>
+        <div class="ft-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>我的</div>
+      </div>
+      <div class="gesture"></div>
+    </div></div>
+  </div>
+
+  <!-- ═══════════ ② AI 模式 ═══════════ -->
+  <div class="screen-wrap">
+    <div class="screen-label">② AI 模式 <span>BYOK · 流式 · 润色指令</span></div>
+    <div class="phone"><div class="hole"></div><div class="viewport">
+      <div class="statusbar"><span>9:41</span><div class="right"><div class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></div><div class="batt"></div></div></div>
+      <div class="navbar">
+        <div class="title">翻译<small>AI 模式</small></div>
+        <div class="nav-group"><div class="nav-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 3v6h6"/></svg></div></div>
+      </div>
+      <div class="content">
+        <div class="card lang-bar">
+          <div class="lang-pill">中文<small>原文</small></div>
+          <div class="swap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M7 16H3m0 0 4-4m-4 4 4 4M17 4v16m0 0 4-4m-4 4-4-4"/></svg></div>
+          <div class="lang-pill">English<small>英语</small></div>
+        </div>
+        <div class="engines">
+          <div class="engine">腾讯云</div>
+          <div class="engine">百度</div>
+          <div class="engine ai on">✦ AI</div>
+          <div class="engine">聚合</div>
+        </div>
+        <div class="card input-card" style="min-height:0">
+          <div class="txt" style="font-size:14px;color:var(--font-2)">这家店的菜真的绝了，强烈推荐！</div>
+        </div>
+        <div class="chips">
+          <div class="chip on">✨ 更地道</div><div class="chip">正式</div><div class="chip">口语化</div><div class="chip">解释语法</div>
+        </div>
+        <div class="card result-card ai-card">
+          <div class="tag-row"><span class="ai-badge">✦ AI · DeepSeek-V3</span><span class="tag gray">流式生成中</span></div>
+          <div class="trans">This place's food is absolutely incredible — I can't recommend it enough!<span class="caret"></span></div>
+          <div class="explain">
+            <b><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2z"/></svg>为什么这样译</b>
+            「绝了」是口语夸张表达，直译 "amazing" 偏平淡；用 "absolutely incredible" + 补充 "can't recommend enough" 更贴近英文美食评论的地道语气。
+          </div>
+        </div>
+        <div class="foot-note">BYOK 直连 · 本条消耗 412 tokens · 不经自建服务器</div>
+      </div>
+      <div class="tab-fade"></div>
+      <div class="float-tab">
+        <div class="ft-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg>翻译</div>
+        <div class="ft-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>历史</div>
+        <div class="ft-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>我的</div>
+      </div>
+      <div class="gesture"></div>
+    </div></div>
+  </div>
+
+  <!-- ═══════════ ③ 聚合翻译 ═══════════ -->
+  <div class="screen-wrap">
+    <div class="screen-label">③ 聚合翻译 <span>多服务商并发 · 结果一键采用</span></div>
+    <div class="phone"><div class="hole"></div><div class="viewport">
+      <div class="statusbar"><span>9:41</span><div class="right"><div class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></div><div class="batt"></div></div></div>
+      <div class="navbar">
+        <div class="title">聚合翻译</div>
+        <div class="nav-group"><div class="nav-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg></div></div>
+      </div>
+      <div class="content">
+        <div class="card" style="padding:13px 15px">
+          <div class="tag gray" style="display:inline-block;margin-bottom:6px">原文 · 中文 · 自动检测</div>
+          <div style="font-size:14.5px;line-height:1.6">本公司秉承客户至上的原则，致力于为客户提供卓越的产品与服务。</div>
+        </div>
+        <div class="chips">
+          <div class="chip on plain">✓ 已采用：AI 润色</div><div class="chip">按质量排序</div><div class="chip">按速度排序</div>
+        </div>
+        <div class="card compare">
+          <div class="col">
+            <div class="who">✦ AI 润色<span class="win">✓ 已采用</span></div>
+            <div class="val">Guided by our customer-first philosophy, we strive to deliver outstanding products and services to every client.</div>
+            <div class="score">完成 3.2s · BYOK · 语义最地道</div>
+          </div>
+          <div class="col">
+            <div class="who">腾讯云<span class="adopt">采用</span></div>
+            <div class="val">Upholding the principle of "customer first", we are committed to providing customers with exceptional products and services.</div>
+            <div class="score">完成 0.9s · 免费 · 最快</div>
+          </div>
+          <div class="col">
+            <div class="who">百度<span class="adopt">采用</span></div>
+            <div class="val">The company adheres to the principle of customer first and is committed to providing customers with excellent products and services.</div>
+            <div class="score">完成 1.3s · 免费</div>
+          </div>
+        </div>
+        <div class="foot-note">3 个引擎已并发返回 · 采用结果自动存入历史</div>
+      </div>
+      <div class="tab-fade"></div>
+      <div class="float-tab">
+        <div class="ft-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg>翻译</div>
+        <div class="ft-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>历史</div>
+        <div class="ft-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>我的</div>
+      </div>
+      <div class="gesture"></div>
+    </div></div>
+  </div>
+
+  <!-- ═══════════ ④ 历史记录 ═══════════ -->
+  <div class="screen-wrap">
+    <div class="screen-label">④ 历史记录 <span>本地存储 · 筛选 · 生词本</span></div>
+    <div class="phone"><div class="hole"></div><div class="viewport">
+      <div class="statusbar"><span>9:41</span><div class="right"><div class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></div><div class="batt"></div></div></div>
+      <div class="navbar">
+        <div class="title">历史</div>
+        <div class="nav-group"><div class="nav-btn" style="color:var(--warning)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></div></div>
+      </div>
+      <div class="content">
+        <div class="search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4-4"/></svg>搜索原文或译文…</div>
+        <div class="seg"><div class="on">全部</div><div>收藏</div><div>生词本</div></div>
+        <div class="chips">
+          <div class="chip on plain">中英</div><div class="chip">中日</div><div class="chip">中韩</div><div class="chip">今天</div>
+        </div>
+        <div class="card" style="flex:1;overflow:hidden">
+          <div class="hist-item hist">
+            <div class="src">Technological advances are making cross-lingual communication easier.</div>
+            <div class="dst">技术进步让跨语言交流变得更容易。</div>
+            <div class="meta"><span class="pill">腾讯云</span><span>英 → 中</span><span>10:24</span><span class="star">★</span></div>
+          </div>
+          <div class="hist-item hist">
+            <div class="src">这家店的菜真的绝了，强烈推荐！</div>
+            <div class="dst">This place's food is absolutely incredible!</div>
+            <div class="meta"><span class="pill" style="color:var(--brand);border-color:var(--brand)">✦ AI</span><span>中 → 英</span><span>09:58</span></div>
+          </div>
+          <div class="hist-item hist">
+            <div class="src">Could you clarify the delivery timeline for order #88231?</div>
+            <div class="dst">能否说明一下 88231 号订单的交付时间？</div>
+            <div class="meta"><span class="pill">百度</span><span>英 → 中</span><span>昨天</span><span class="star" style="color:var(--font-4)">☆</span></div>
+          </div>
+        </div>
+        <div class="foot-note">共 128 条 · 本地存储 · 长按删除单条</div>
+      </div>
+      <div class="tab-fade"></div>
+      <div class="float-tab">
+        <div class="ft-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg>翻译</div>
+        <div class="ft-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>历史</div>
+        <div class="ft-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>我的</div>
+      </div>
+      <div class="gesture"></div>
+    </div></div>
+  </div>
+
+  <!-- ═══════════ ⑤ 我的 / 设置 ═══════════ -->
+  <div class="screen-wrap">
+    <div class="screen-label">⑤ 我的 / 设置 <span>引擎凭证 · BYOK · 外观</span></div>
+    <div class="phone"><div class="hole"></div><div class="viewport">
+      <div class="statusbar"><span>9:41</span><div class="right"><div class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></div><div class="batt"></div></div></div>
+      <div class="navbar">
+        <div class="title">我的</div>
+        <div class="nav-group"><div class="nav-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/></svg></div></div>
+      </div>
+      <div class="content">
+        <div class="group">
+          <div class="row"><div class="ic" style="background:#0A9BFF">讯</div><div>腾讯云 TMT<div class="sub">免费层主力 · 每月 500 万字符</div></div><div class="tail"><span class="ok">✓ 已配置</span></div></div>
+          <div class="row"><div class="ic" style="background:#2932E1">百</div><div>百度翻译<div class="sub">备用引擎 · QPS 限制 1</div></div><div class="tail"><span class="ok">✓ 已配置</span></div></div>
+          <div class="row" style="background:var(--brand-10)"><div class="ic" style="background:var(--ai-grad)">✦</div><div>AI 引擎（BYOK）<div class="sub">DeepSeek-V3 · 直连官方 API</div></div><div class="tail" style="color:var(--brand)">编辑 <span style="font-size:14px">›</span></div></div>
+        </div>
+        <div class="group">
+          <div class="row"><div class="ic" style="background:#8E8E93">译</div><div>默认引擎</div><div class="tail">腾讯云 <span style="font-size:14px">›</span></div></div>
+          <div class="row"><div class="ic" style="background:#64BB5C">对</div><div>默认语言对<div class="sub">自动检测 → English</div></div><div class="tail"><span style="font-size:14px">›</span></div></div>
+          <div class="row"><div class="ic" style="background:#E8A123">外</div><div>深色模式</div><div class="tail">跟随系统 <div class="switch"></div></div></div>
+        </div>
+        <div class="group">
+          <div class="row"><div class="ic" style="background:#30A46C">密</div><div>隐私说明<div class="sub">凭证加密存储 · BYOK 不经自建服务器</div></div><div class="tail"><span style="font-size:14px">›</span></div></div>
+          <div class="row"><div class="ic" style="background:#8E8E93">关</div><div>关于译鸿</div><div class="tail">v0.1.0 <span style="font-size:14px">›</span></div></div>
+        </div>
+        <div class="foot-note">API Key 存于 Asset Store Kit 加密存储</div>
+      </div>
+      <div class="tab-fade"></div>
+      <div class="float-tab">
+        <div class="ft-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg>翻译</div>
+        <div class="ft-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>历史</div>
+        <div class="ft-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>我的</div>
+      </div>
+      <div class="gesture"></div>
+    </div></div>
+  </div>
+
+  <!-- ═══════════ ⑥ 半模态面板 ═══════════ -->
+  <div class="screen-wrap">
+    <div class="screen-label">⑥ 半模态面板 <span>引擎选择 · 拖拽条 + 关闭按钮 · 沉浸光感</span></div>
+    <div class="phone"><div class="hole"></div><div class="viewport">
+      <div class="statusbar"><span>9:41</span><div class="right"><div class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></div><div class="batt"></div></div></div>
+      <!-- 背景为压暗的翻译页 -->
+      <div class="navbar">
+        <div class="title" style="opacity:.55">翻译<small>译鸿</small></div>
+      </div>
+      <div class="content" style="opacity:.55">
+        <div class="card lang-bar">
+          <div class="lang-pill">自动检测<small>已识别：中文</small></div>
+          <div class="swap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M7 16H3m0 0 4-4m-4 4 4 4M17 4v16m0 0 4-4m-4 4-4-4"/></svg></div>
+          <div class="lang-pill">English<small>英语</small></div>
+        </div>
+        <div class="engines"><div class="engine on">腾讯云</div><div class="engine">百度</div><div class="engine ai">✦ AI</div><div class="engine">聚合</div></div>
+        <div class="card input-card"><div class="txt">科技的进步让跨语言交流变得越来越简单。</div></div>
+      </div>
+      <div class="sheet-dim"></div>
+      <div class="sheet">
+        <div class="grab"></div>
+        <div class="sh-head">
+          <div class="t">选择翻译引擎</div>
+          <div class="close"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6 6 18M6 6l12 12"/></svg></div>
+        </div>
+        <div class="eng-row sel">
+          <div class="ic" style="background:#0A9BFF">讯</div>
+          <div><div class="nm">腾讯云 TMT</div><div class="ds">免费层主力 · 500 万字符/月 · 平均 0.9s</div></div>
+          <div class="radio on"></div>
+        </div>
+        <div class="eng-row">
+          <div class="ic" style="background:#2932E1">百</div>
+          <div><div class="nm">百度翻译</div><div class="ds">备用引擎 · QPS 限制 1</div></div>
+          <div class="radio"></div>
+        </div>
+        <div class="eng-row">
+          <div class="ic" style="background:linear-gradient(135deg,#7B5CFF,#0A59F7)">✦</div>
+          <div><div class="nm">AI 引擎 · BYOK</div><div class="ds">DeepSeek-V3 · 直连官方 API · 支持润色</div></div>
+          <div class="radio"></div>
+        </div>
+        <div class="eng-row" style="opacity:.5">
+          <div class="ic" style="background:#8E8E93">+</div>
+          <div><div class="nm">添加自定义引擎</div><div class="ds">兼容 OpenAI 格式的任意服务商</div></div>
+          <div class="radio"></div>
+        </div>
+        <div class="foot-note">选择后立即生效 · 引擎插件化，新增引擎零改动</div>
+      </div>
+      <div class="gesture"></div>
+    </div></div>
+  </div>
+
+</div>
+
+<script>
+  function toggleTheme(){
+    const html=document.documentElement;
+    const next=html.dataset.theme==='dark'?'light':'dark';
+    html.dataset.theme=next;
+    document.getElementById('themeLabel').textContent=next==='dark'?'亮色模式预览':'深色模式预览';
+  }
+</script>
+</body>
+</html>
