@@ -17,9 +17,17 @@ import { Ux } from '../common/Ux';
 import { APP_VERSION } from './AboutPage';
 import { PILL_VERSION_KEY } from '../components/EngineSelector';
 import { PluginInstaller, InstalledPlugin } from '../services/plugin/PluginInstaller';
+import { parseManggoServices } from '../services/plugin/ManggoTypes';
 
 interface EngineOption {
   id: string;
+  label: string;
+}
+
+/** TTS/OCR 服务选项：'system' + 各插件服务实例（Bob 单实例；Manggo 每服务一实例） */
+interface PluginEngineOption {
+  /** 引擎 id：'plugin-<pid>'（Bob）| 'plugin-<pid>#<sid>'（Manggo） */
+  engineId: string;
   label: string;
 }
 
@@ -41,9 +49,9 @@ export struct SettingsPageContent {
   /** 语音服务 TTS / 文字识别 OCR 服务选择（'system' = 系统服务） */
   @State ttsEngineId: string = 'system';
   @State ocrEngineId: string = 'system';
-  /** 已安装的 TTS / OCR 插件清单（Select 选项来源） */
-  @State ttsPlugins: InstalledPlugin[] = [];
-  @State ocrPlugins: InstalledPlugin[] = [];
+  /** TTS/OCR 服务选项（Select 选项来源；含 Manggo 多服务插件的逐服务实例） */
+  @State ttsPlugins: PluginEngineOption[] = [];
+  @State ocrPlugins: PluginEngineOption[] = [];
   /** 拍照翻译：照片是否保存到相册（默认不保存，识别后即删） */
   @State ocrSaveGallery: boolean = false;
   /** 备份/恢复进行中（防重复点击） */
@@ -103,67 +111,78 @@ export struct SettingsPageContent {
     AppStorage.setOrCreate('pref_to_lang', this.toLang);
   }
 
-  /** 刷新已安装 TTS/OCR 插件清单（仅【已启用】的插件进入 Select；停用即从选项消失）。
-   *  当前选中的插件若被停用，自动回退系统服务。 */
+  /** 刷新已安装 TTS/OCR 插件服务选项（仅【已启用】的服务进入 Select；停用即从选项消失）。
+   *  Bob 单实例（'plugin-<pid>'）；Manggo 逐服务实例（'plugin-<pid>#<sid>'）。
+   *  当前选中的服务若被停用，自动回退系统服务。 */
   private refreshPluginEngines(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
     PluginInstaller.list(ctx).then((list: InstalledPlugin[]): void => {
-      const enabledOf = (category: string): InstalledPlugin[] => {
-        return list.filter((p: InstalledPlugin): boolean => {
-          if (p.category !== category) {
-            return false;
+      const buildOptions = (manggoKind: string, bobCategory: string): PluginEngineOption[] => {
+        const out: PluginEngineOption[] = [];
+        for (const p of list) {
+          if (p.source === 'manggo') {
+            for (const svc of parseManggoServices(p.infoJson)) {
+              if (svc.kind !== manggoKind) {
+                continue;
+              }
+              const engineId = `plugin-${p.pluginId}#${svc.id}`;
+              const svcItem = settingsStore.getService(engineId);
+              if (svcItem !== undefined && svcItem.enabled) {
+                const label = svcItem.name.length > 0 ? svcItem.name
+                  : (svc.displayName.length > 0 ? svc.displayName : p.name);
+                out.push({ engineId: engineId, label: label });
+              }
+            }
+            continue;
           }
-          const svc = settingsStore.getService('plugin-' + p.pluginId);
-          return svc !== undefined && svc.enabled;
-        });
+          if (p.category !== bobCategory) {
+            continue;
+          }
+          const svcBob = settingsStore.getService('plugin-' + p.pluginId);
+          if (svcBob !== undefined && svcBob.enabled) {
+            out.push({
+              engineId: 'plugin-' + p.pluginId,
+              label: svcBob.name.length > 0 ? svcBob.name : p.name
+            });
+          }
+        }
+        return out;
       };
-      this.ttsPlugins = enabledOf('tts');
-      this.ocrPlugins = enabledOf('ocr');
-      // 选中项被停用 → 回退系统服务
-      if (this.ttsEngineId.startsWith('plugin-') && this.ttsPlugins.length > 0) {
-        const pid = this.ttsEngineId.substring('plugin-'.length);
-        if (!this.ttsPlugins.some((p: InstalledPlugin): boolean => p.pluginId === pid)) {
-          this.ttsEngineId = 'system';
-          settingsStore.setTtsEngineId('system');
-        }
+      this.ttsPlugins = buildOptions('speech', 'tts');
+      this.ocrPlugins = buildOptions('ocr', 'ocr');
+      // 选中项被停用/删除 → 回退系统服务
+      if (this.ttsEngineId.startsWith('plugin-')
+        && !this.ttsPlugins.some((o: PluginEngineOption): boolean => o.engineId === this.ttsEngineId)) {
+        this.ttsEngineId = 'system';
+        settingsStore.setTtsEngineId('system');
       }
-      if (this.ocrEngineId.startsWith('plugin-') && this.ocrPlugins.length > 0) {
-        const pid = this.ocrEngineId.substring('plugin-'.length);
-        if (!this.ocrPlugins.some((p: InstalledPlugin): boolean => p.pluginId === pid)) {
-          this.ocrEngineId = 'system';
-          settingsStore.setOcrEngineId('system');
-        }
+      if (this.ocrEngineId.startsWith('plugin-')
+        && !this.ocrPlugins.some((o: PluginEngineOption): boolean => o.engineId === this.ocrEngineId)) {
+        this.ocrEngineId = 'system';
+        settingsStore.setOcrEngineId('system');
       }
     }).catch((e: Object): void => {
       // 清单读取失败保持空选项（仅系统服务可选）
     });
   }
 
-  /** TTS/OCR Select 选项：系统服务 + 已装插件 */
-  private serviceOptions(plugins: InstalledPlugin[]): SelectOption[] {
+  /** TTS/OCR Select 选项：系统服务 + 已启用插件服务 */
+  private serviceOptions(plugins: PluginEngineOption[]): SelectOption[] {
     const opts: SelectOption[] = [{ value: '系统服务' }];
-    for (const p of plugins) {
-      opts.push({ value: p.name });
+    for (const o of plugins) {
+      opts.push({ value: o.label });
     }
     return opts;
   }
 
-  private serviceSelectedIndex(id: string, plugins: InstalledPlugin[]): number {
-    if (id.startsWith('plugin-')) {
-      const pluginId = id.substring('plugin-'.length);
-      const idx = plugins.findIndex((p: InstalledPlugin): boolean => p.pluginId === pluginId);
-      return idx >= 0 ? idx + 1 : 0;
-    }
-    return 0;
+  private serviceSelectedIndex(id: string, plugins: PluginEngineOption[]): number {
+    const idx = plugins.findIndex((o: PluginEngineOption): boolean => o.engineId === id);
+    return idx >= 0 ? idx + 1 : 0;
   }
 
-  private serviceSelectedLabel(id: string, plugins: InstalledPlugin[]): string {
-    if (id.startsWith('plugin-')) {
-      const pluginId = id.substring('plugin-'.length);
-      const hit = plugins.find((p: InstalledPlugin): boolean => p.pluginId === pluginId);
-      return hit !== undefined ? hit.name : '系统服务';
-    }
-    return '系统服务';
+  private serviceSelectedLabel(id: string, plugins: PluginEngineOption[]): string {
+    const hit = plugins.find((o: PluginEngineOption): boolean => o.engineId === id);
+    return hit !== undefined ? hit.label : '系统服务';
   }
 
   private pickTtsEngine(id: string): void {
@@ -565,7 +584,7 @@ export struct SettingsPageContent {
                   if (index <= 0) {
                     this.pickTtsEngine('system');
                   } else if (index - 1 < this.ttsPlugins.length) {
-                    this.pickTtsEngine('plugin-' + this.ttsPlugins[index - 1].pluginId);
+                    this.pickTtsEngine(this.ttsPlugins[index - 1].engineId);
                   }
                 })
             }
@@ -591,7 +610,7 @@ export struct SettingsPageContent {
                   if (index <= 0) {
                     this.pickOcrEngine('system');
                   } else if (index - 1 < this.ocrPlugins.length) {
-                    this.pickOcrEngine('plugin-' + this.ocrPlugins[index - 1].pluginId);
+                    this.pickOcrEngine(this.ocrPlugins[index - 1].engineId);
                   }
                 })
             }
@@ -790,24 +809,6 @@ export struct SettingsPageContent {
             .padding({ top: 13, bottom: 13 })
             .onClick(() => {
               this.pathStack.pushPath({ name: 'AboutPage' });
-            })
-
-            // TODO(spike) 插件实验室入口：验证完成后移除
-            Divider().color($r('app.color.divider')).strokeWidth(0.8)
-
-            Row() {
-              Text('插件实验室（开发）')
-                .fontSize(15)
-                .fontColor($r('app.color.font_primary'))
-              Blank()
-              SymbolGlyph($r('sys.symbol.chevron_right'))
-                .fontSize(14)
-                .fontColor([$r('app.color.font_fourth')])
-            }
-            .width('100%')
-            .padding({ top: 13, bottom: 13 })
-            .onClick(() => {
-              this.pathStack.pushPath({ name: 'PluginLabPage' });
             })
           }
           .width('100%')

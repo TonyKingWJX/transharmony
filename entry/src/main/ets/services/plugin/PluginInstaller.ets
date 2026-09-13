@@ -3,18 +3,33 @@ import zlib from '@ohos.zlib';
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { AssetVault } from '../AssetVault';
+import { devLogStore } from '../DevLogStore';
 import pluginHost from 'libpluginhost.so';
+import {
+  manggoCategoryOfKind,
+  manggoServiceId,
+  parseManggoConfigItems,
+  parseManggoServices,
+  isSupportedManggoService,
+  transformManggoEsm,
+  transformManggoModule,
+  buildManggoRegisterSnippetFor,
+  resolvePluginIconPath
+} from './ManggoTypes';
 
 /**
- * .bobplugin 安装器：zip 解压 → info.json 校验 → 沙箱落盘 → 登记持久化 → 加载进运行时。
+ * 插件安装器：zip 解压 → 清单校验 → 沙箱落盘 → 登记持久化 → 加载进运行时。
+ * 支持两种插件包（均按 zip 解压，以根目录清单文件区分）：
+ *  - .bobplugin（info.json，Bob 单服务模型，category 单值）；
+ *  - .mplugin（manggo.plugin.json，Manggo 多服务模型，services[] 按 kind 归类）。
  *
- * Bob 插件包结构（.bobplugin = zip）：根目录 info.json + main.js（+ 可选 icon.png/libs）。
- * info.json 关键字段（bobtranslate.com/plugin/quickstart/info.html）：
+ * Bob info.json 关键字段（bobtranslate.com/plugin/quickstart/info.html）：
  *   identifier（数字+小写字母+.）/ version / category（translate|ocr|tts 单值）/ name /
  *   options: [{identifier, type: text|menu, title, defaultValue?, textConfig?, menuValues?}]
  *
  * 持久化：已安装列表存 Preferences「transharmony_plugins」；插件目录 filesDir/plugins/<identifier>/<version>；
- * 选项值存 Preferences key「cfg_<pluginId>_<identifier>」（secure 选项改 Asset Vault 属 UI 阶段工作）。
+ * Bob 选项值存 Preferences key「cfg_<pluginId>_<identifier>」；
+ * Manggo 配置值存 Preferences key「cfg_<pluginId>_<serviceId>_<key>」（secure 选项存 Asset Vault）。
  */
 
 /** 已安装插件记录 */
@@ -22,12 +37,14 @@ export interface InstalledPlugin {
   pluginId: string;
   name: string;
   version: string;
+  /** Bob：info.json category；Manggo：首个受支持服务的 kind 映射（多服务插件取首个） */
   category: string; // translate | ocr | tts
   /** 插件来源：'bob' | 'manggo'（旧记录缺省按 bob 显示） */
   source: string;
   dir: string; // 解压根目录
   mainPath: string;
-  infoJson: string; // info.json 原文（加载时透传给 $info）
+  /** Bob：info.json 原文（加载时透传给 $info）；Manggo：manggo.plugin.json 原文 */
+  infoJson: string;
 }
 
 const PREF_STORE = 'transharmony_plugins';
@@ -58,13 +75,28 @@ export class PluginInstaller {
     return PluginInstaller.installFromZip(ctx, zipPath, allowedCategories);
   }
 
-  /** 安装：解压 → 校验 → 落盘 → 登记（allowedCategories 限制可安装类别，默认三类全收） */
+  /** 安装：解压 → 校验 → 落盘 → 登记（allowedCategories 限制可安装类别，默认三类全收；失败采集日志） */
   static async installFromZip(ctx: common.UIAbilityContext, zipPath: string,
     allowedCategories: string[] = CATEGORIES): Promise<InstalledPlugin> {
-    // 1) 解压到临时目录（读 info.json 确定标识与版本）
+    try {
+      return await PluginInstaller.doInstallFromZip(ctx, zipPath, allowedCategories);
+    } catch (e) {
+      const msg = (e instanceof Error) ? e.message : String(e);
+      devLogStore.append('error', 'plugin', `安装失败：${msg}`);
+      throw new Error(msg);
+    }
+  }
+
+  private static async doInstallFromZip(ctx: common.UIAbilityContext, zipPath: string,
+    allowedCategories: string[] = CATEGORIES): Promise<InstalledPlugin> {
+    // 1) 解压到临时目录（读清单确定标识与版本；按根目录清单文件区分 Bob/Manggo）
     const tmpDir = `${ctx.cacheDir}/unzip_${Date.now()}`;
     fileIo.mkdirSync(tmpDir, true);
     await zlib.decompressFile(zipPath, tmpDir);
+
+    if (fileIo.accessSync(`${tmpDir}/manggo.plugin.json`)) {
+      return PluginInstaller.installManggo(ctx, zipPath, tmpDir, allowedCategories);
+    }
 
     const infoPath = `${tmpDir}/info.json`;
     if (!fileIo.accessSync(infoPath)) {
@@ -123,6 +155,87 @@ export class PluginInstaller {
       list.push(rec);
     }
     await PluginInstaller.saveList(ctx, list);
+    devLogStore.append('info', 'plugin', `安装成功：${name} v${version} (${identifier})`);
+    return rec;
+  }
+
+  /** Manggo 插件（.mplugin）安装：清单校验 → 落盘 → 登记（多服务插件登记为一条记录，服务经 services[] 解析） */
+  private static async installManggo(ctx: common.UIAbilityContext, zipPath: string, tmpDir: string,
+    allowedCategories: string[]): Promise<InstalledPlugin> {
+    const manifestPath = `${tmpDir}/manggo.plugin.json`;
+    const manifestJson = fileIo.readTextSync(manifestPath);
+    let manifest: Record<string, Object> = {};
+    try {
+      manifest = JSON.parse(manifestJson) as Record<string, Object>;
+    } catch (e) {
+      PluginInstaller.rmDir(tmpDir);
+      throw new Error('manggo.plugin.json 不是有效的 JSON');
+    }
+    if (manifest['manifestVersion'] !== 1) {
+      PluginInstaller.rmDir(tmpDir);
+      throw new Error('不支持的 manggo 清单版本（仅支持 manifestVersion: 1）');
+    }
+    const identifier = PluginInstaller.strField(manifest, 'id');
+    const version = PluginInstaller.strField(manifest, 'version');
+    const name = PluginInstaller.strField(manifest, 'name');
+    if (identifier === '' || version === '' || name === '') {
+      PluginInstaller.rmDir(tmpDir);
+      throw new Error('manggo.plugin.json 缺少必填字段（id/version/name）');
+    }
+    // 运行时：固定 bun / manggo.plugin.v1（宿主以 JSVM + ESM 转换层模拟）
+    const rawRuntime = manifest['runtime'];
+    if (typeof rawRuntime !== 'object' || rawRuntime === null) {
+      PluginInstaller.rmDir(tmpDir);
+      throw new Error('manggo.plugin.json 缺少 runtime 字段');
+    }
+    const runtime = rawRuntime as Record<string, Object>;
+    const api = PluginInstaller.strField(runtime, 'api');
+    if (api !== 'manggo.plugin.v1') {
+      PluginInstaller.rmDir(tmpDir);
+      throw new Error(`不支持的插件 API 版本: ${api}（仅支持 manggo.plugin.v1）`);
+    }
+    const mainFile = PluginInstaller.strField(runtime, 'main') !== ''
+      ? PluginInstaller.strField(runtime, 'main') : 'main.js';
+    // 服务：至少一个受支持类别（translation/ocr/speech；wordbook/action 暂不支持）
+    const services = parseManggoServices(manifestJson).filter((s): boolean => isSupportedManggoService(s));
+    if (services.length === 0) {
+      PluginInstaller.rmDir(tmpDir);
+      throw new Error('插件未包含受支持的服务（翻译 / OCR / 语音）');
+    }
+    if (!fileIo.accessSync(`${tmpDir}/${mainFile}`)) {
+      PluginInstaller.rmDir(tmpDir);
+      throw new Error('不是有效的 manggo 插件包：缺少 ' + mainFile);
+    }
+
+    // 落盘：filesDir/plugins/<id>/<version>（重装覆盖）
+    const destDir = `${ctx.filesDir}/plugins/${identifier}/${version}`;
+    PluginInstaller.rmDir(destDir);
+    fileIo.mkdirSync(destDir, true);
+    await zlib.decompressFile(zipPath, destDir);
+    PluginInstaller.rmDir(tmpDir);
+    fileIo.unlinkSync(zipPath);
+
+    // 类别：首个受支持服务的 kind（多服务插件归入首个板块）
+    const category = manggoCategoryOfKind(services[0].kind);
+    const rec: InstalledPlugin = {
+      pluginId: identifier,
+      name: name,
+      version: version,
+      category: category,
+      source: 'manggo',
+      dir: destDir,
+      mainPath: `${destDir}/${mainFile}`,
+      infoJson: manifestJson
+    };
+    const list = await PluginInstaller.list(ctx);
+    const idx = list.findIndex(p => p.pluginId === rec.pluginId);
+    if (idx >= 0) {
+      list[idx] = rec;
+    } else {
+      list.push(rec);
+    }
+    await PluginInstaller.saveList(ctx, list);
+    devLogStore.append('info', 'plugin', `安装成功：${name} v${version} (${identifier})`);
     return rec;
   }
 
@@ -137,10 +250,27 @@ export class PluginInstaller {
     }
   }
 
-  /** 加载已安装插件进运行时（确保 runtime 已启动；读取 main.js + 附加 .js 模块 + 组装 configJson） */
+  /** 加载已安装插件进运行时（确保 runtime 已启动；读取 main.js + 附加 .js 模块 + 组装 configJson）。
+   *  Bob：原生脚本直接加载（Bob shim）；Manggo：ESM 转换 + 服务注册代码（manggo 启动脚本）。 */
   static async loadInstalled(ctx: common.UIAbilityContext, rec: InstalledPlugin,
     valuesOverride?: Record<string, string>): Promise<string> {
     await pluginHost.initRuntime();
+    try {
+      const result = rec.source === 'manggo'
+        ? await PluginInstaller.loadManggo(ctx, rec)
+        : await PluginInstaller.loadBob(ctx, rec, valuesOverride);
+      devLogStore.append('info', 'plugin', `加载成功：${rec.name} v${rec.version} (${rec.pluginId})`);
+      return result;
+    } catch (e) {
+      const msg = (e instanceof Error) ? e.message : String(e);
+      devLogStore.append('error', 'plugin', `加载失败：${rec.name} (${rec.pluginId})：${msg}`);
+      throw new Error(msg);
+    }
+  }
+
+  /** Bob 加载（原 loadInstalled 主体，抽出便于错误采集） */
+  private static async loadBob(ctx: common.UIAbilityContext, rec: InstalledPlugin,
+    valuesOverride?: Record<string, string>): Promise<string> {
     const mainJs = fileIo.readTextSync(rec.mainPath);
     const configJson = await PluginInstaller.buildConfigJson(ctx, rec, valuesOverride);
     const modulesJson = PluginInstaller.collectModules(ctx, rec);
@@ -158,14 +288,135 @@ export class PluginInstaller {
       rec.dir, sandboxDir, ctx.applicationInfo.name);
   }
 
+  /** Manggo 加载：主脚本（注册默认服务）+ 各服务专用脚本（services[].main，IIFE 隔离顶层命名）；
+   *  全部经 ESM → 经典脚本转换，配置 = 各服务 config 表单值。 */
+  private static async loadManggo(ctx: common.UIAbilityContext, rec: InstalledPlugin): Promise<string> {
+    const mainJs = fileIo.readTextSync(rec.mainPath);
+    const configJson = await PluginInstaller.buildManggoConfig(ctx, rec);
+    const modulesJson = PluginInstaller.collectModules(ctx, rec);
+    const sandboxDir = `${ctx.filesDir}/plugin_sandbox/${rec.pluginId}`;
+    try {
+      if (!fileIo.accessSync(sandboxDir)) {
+        fileIo.mkdirSync(sandboxDir, true);
+      }
+    } catch (e) {
+      // 已存在等场景忽略
+    }
+    const services = parseManggoServices(rec.infoJson).filter((s): boolean => isSupportedManggoService(s));
+    const defaultSvcs = services.filter((s): boolean => s.mainScript === '');
+    const customSvcs = services.filter((s): boolean => s.mainScript !== '');
+    const trMain = transformManggoEsm(mainJs, buildManggoRegisterSnippetFor(defaultSvcs));
+    if (trMain.error.length > 0) {
+      throw new Error(trMain.error);
+    }
+    let code = trMain.code;
+    for (const svc of customSvcs) {
+      const segPath = `${rec.dir}/${svc.mainScript}`;
+      if (!fileIo.accessSync(segPath)) {
+        throw new Error(`服务 ${svc.id} 的专用脚本不存在: ${svc.mainScript}`);
+      }
+      const segJs = fileIo.readTextSync(segPath);
+      const trSeg = transformManggoEsm(segJs, buildManggoRegisterSnippetFor([svc]));
+      if (trSeg.error.length > 0) {
+        throw new Error(`服务 ${svc.id} 脚本转换失败: ${trSeg.error}`);
+      }
+      // IIFE 隔离：各段顶层 const/class 互不冲突；段内注册代码解析本段入口，全局注册器/服务配置照常可达
+      code += '\n;(function () {\n' + trSeg.code + '\n})();\n';
+    }
+    return pluginHost.loadPlugin(rec.pluginId, code, configJson, modulesJson,
+      rec.dir, sandboxDir, ctx.applicationInfo.name, 'manggo');
+  }
+
+  /** Manggo 配置组装：{manggo: true, services: {<serviceId>: {<key>: 类型化值}}}。
+   *  值优先级：ASSET（password）→ Preferences（cfg_<pid>_<sid>_<key>）→ 清单 default；
+   *  boolean/integer/decimal 按清单控件类型还原（存储一律为字符串）。 */
+  static async buildManggoConfig(ctx: common.UIAbilityContext, rec: InstalledPlugin): Promise<string> {
+    const services: Record<string, Object> = {};
+    const store = await preferences.getPreferences(ctx, PREF_STORE);
+    for (const svc of parseManggoServices(rec.infoJson)) {
+      if (!isSupportedManggoService(svc)) {
+        continue;
+      }
+      const cfg: Record<string, Object> = {};
+      for (const item of parseManggoConfigItems(svc.configJson)) {
+        const key = PluginInstaller.strField(item, 'key');
+        if (key === '') {
+          continue;
+        }
+        const control = PluginInstaller.strField(item, 'control');
+        const rawDefault = item['default'];
+        const defStr = typeof rawDefault === 'string' ? rawDefault as string
+          : (typeof rawDefault === 'number' || typeof rawDefault === 'boolean') ? `${rawDefault}` : '';
+        let value = await store.get(`cfg_${rec.pluginId}_${svc.id}_${key}`, '') as string;
+        if ((value === undefined || value.length === 0) && control === 'password') {
+          const secret = AssetVault.read(`${manggoServiceId(rec.pluginId, svc.id)}_${key}`);
+          if (secret !== '') {
+            value = secret;
+          }
+        }
+        if (value === undefined || value.length === 0) {
+          value = defStr;
+        }
+        let typed: Object = value;
+        if (control === 'boolean') {
+          typed = value === 'true';
+        } else if (control === 'integer') {
+          const n = parseInt(value, 10);
+          if (!isNaN(n)) {
+            typed = n;
+          }
+        } else if (control === 'decimal') {
+          const f = parseFloat(value);
+          if (!isNaN(f)) {
+            typed = f;
+          }
+        }
+        cfg[key] = typed;
+      }
+      services[svc.id] = cfg;
+    }
+    const configObj: Record<string, Object> = { 'manggo': true, 'services': services };
+    return JSON.stringify(configObj);
+  }
+
+  /** 保存单个 Manggo 服务配置项：password → ASSET，其余 → Preferences（插件配置页保存用） */
+  static async saveManggoOptionValue(ctx: common.UIAbilityContext, pluginId: string, serviceId: string,
+    item: Record<string, Object>, value: string): Promise<void> {
+    const key = PluginInstaller.strField(item, 'key');
+    if (key === '') {
+      return;
+    }
+    if (PluginInstaller.strField(item, 'control') === 'password') {
+      const alias = `${manggoServiceId(pluginId, serviceId)}_${key}`;
+      if (value.length > 0) {
+        await AssetVault.write(alias, value);
+      } else {
+        AssetVault.remove(alias);
+      }
+      return;
+    }
+    const store = await preferences.getPreferences(ctx, PREF_STORE);
+    await store.put(`cfg_${pluginId}_${serviceId}_${key}`, value);
+    await store.flush();
+  }
+
   /** 收集插件包内全部 .js 源码（相对路径 → 源码），供沙盒内 CommonJS require */
+  /** 收集插件包内全部 .js 源码（相对路径 → 源码），供沙盒内 CommonJS require。
+   *  manggo 插件的模块文件若含 import/export（ESM），先转换为 CommonJS（export 回填 module.exports）。 */
   private static collectModules(ctx: common.UIAbilityContext, rec: InstalledPlugin): string {
     const modules: Record<string, string> = {};
     try {
       const names = fileIo.listFileSync(rec.dir);
       for (const name of names) {
         if (name.length > 3 && name.substring(name.length - 3) === '.js') {
-          modules[name] = fileIo.readTextSync(`${rec.dir}/${name}`);
+          let src = fileIo.readTextSync(`${rec.dir}/${name}`);
+          if (rec.source === 'manggo' && /(^|\n)[ \t]*(import[\s{("' *]|export[ \t{*])/.test(src)) {
+            const tr = transformManggoModule(src);
+            if (tr.error.length === 0) {
+              src = tr.code;
+            }
+          }
+          modules[name] = src;
         }
       }
     } catch (e) {
@@ -207,8 +458,11 @@ export class PluginInstaller {
     return JSON.stringify(configObj);
   }
 
-  /** 选项是否为密钥类（textConfig.type === 'secure'） */
+  /** 选项是否为密钥类：textConfig.type === 'secure'，或 Bob 新版标记 isKeyOption === true */
   static isSecureOption(item: Record<string, Object>): boolean {
+    if (item['isKeyOption'] === true) {
+      return true;
+    }
     const tc = item['textConfig'];
     if (typeof tc !== 'object' || tc === null || Array.isArray(tc)) {
       return false;
@@ -217,7 +471,7 @@ export class PluginInstaller {
     return t === 'secure';
   }
 
-  /** 解析插件 info.json 中的 secure 选项 identifier 列表（卸载清密钥用） */
+  /** 解析插件 info.json 中的 secure 选项 identifier 列表（仅 Bob；卸载清密钥用） */
   static secureOptionIds(rec: InstalledPlugin): string[] {
     const out: string[] = [];
     try {
@@ -234,6 +488,43 @@ export class PluginInstaller {
       // info.json 异常按无密钥项处理
     }
     return out;
+  }
+
+  /** 收集卸载时需清除的 ASSET 别名（完整别名，uninstall 直接按别名清除）：
+   *  Bob：plugin-<pid>_<optIdentifier>；Manggo：plugin-<pid>#<sid>_<cfgKey>（control=password） */
+  static secureAliases(rec: InstalledPlugin): string[] {
+    const out: string[] = [];
+    if (rec.source === 'manggo') {
+      for (const svc of parseManggoServices(rec.infoJson)) {
+        if (!isSupportedManggoService(svc)) {
+          continue;
+        }
+        const svcAlias = manggoServiceId(rec.pluginId, svc.id);
+        for (const item of parseManggoConfigItems(svc.configJson)) {
+          const key = PluginInstaller.strField(item, 'key');
+          if (key !== '' && PluginInstaller.strField(item, 'control') === 'password') {
+            out.push(`${svcAlias}_${key}`);
+          }
+        }
+      }
+      return out;
+    }
+    for (const key of PluginInstaller.secureOptionIds(rec)) {
+      out.push(`${pluginServiceAlias(rec.pluginId)}_${key}`);
+    }
+    return out;
+  }
+
+  /** 插件图标绝对路径（Bob info.json icon / manggo 清单 icon；支持字符串或 {universal:...} 对象）。
+   *  无图标或路径不存在返回空串。 */
+  static pluginIconPath(rec: InstalledPlugin): string {
+    try {
+      const info = JSON.parse(rec.infoJson) as Record<string, Object>;
+      const path = resolvePluginIconPath(rec.dir, info['icon']);
+      return path.length > 0 && fileIo.accessSync(path) ? path : '';
+    } catch (e) {
+      return '';
+    }
   }
 
   /** 保存单个选项值：secure → ASSET，其余 → Preferences（插件配置页保存用） */
@@ -270,8 +561,10 @@ export class PluginInstaller {
       PluginInstaller.rmDir(`${ctx.filesDir}/plugins/${pluginId}`);
       PluginInstaller.rmDir(`${ctx.filesDir}/plugin_sandbox/${pluginId}`);
     }
+    devLogStore.append('info', 'plugin', `已卸载：${hit !== undefined ? hit.name : pluginId} (${pluginId})`);
+    // secureKeys 为完整 ASSET 别名（Bob: plugin-<pid>_<opt>；Manggo: plugin-<pid>#<sid>_<key>）
     for (const key of secureKeys) {
-      AssetVault.remove(`${pluginServiceAlias(pluginId)}_${key}`);
+      AssetVault.remove(key);
     }
   }
 

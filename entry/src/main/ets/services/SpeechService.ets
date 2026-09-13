@@ -5,8 +5,10 @@ import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { settingsStore } from './SettingsStore';
+import { devLogStore } from './DevLogStore';
 import { SpeechPlayback, PluginTtsPlayback } from './plugin/PluginTtsPlayback';
 import { bobPluginEngine } from './plugin/BobPluginEngine';
+import { splitServiceRef, parseManggoServices, manggoServiceLangs } from './plugin/ManggoTypes';
 
 const TAG = 'SpeechService';
 
@@ -159,6 +161,8 @@ export class SpeechService {
   private static asrEngine: speechRecognizer.SpeechRecognitionEngine | null = null;
   /** 当前 TTS 播放通道（系统 TtsPlayback 或插件 PluginTtsPlayback，含暂停/继续能力） */
   private static playback: SpeechPlayback | null = null;
+  /** TTS 作废代次：新 speak 或 stopSpeak 递增，合成期间被停止的在途请求音频就绪后直接丢弃 */
+  private static speakEpoch: number = 0;
   /** 应用上下文（bootstrap 存入）：插件 TTS 的临时音频文件落盘用 */
   private static appCtx: common.UIAbilityContext | null = null;
   /** 当前通道归属：'input' | 'result'，供调用方区分两颗按钮 */
@@ -175,13 +179,27 @@ export class SpeechService {
     SpeechService.appCtx = context;
   }
 
-  /** 当前 TTS 服务是否支持该语言：插件服务按插件声明（未声明=放行），系统服务仅中英 */
+  /** 当前 TTS 服务是否支持该语言：插件服务按声明（未声明=放行），系统服务仅中英 */
   static isLangSupported(code: string): boolean {
     const ttsEngineId = settingsStore.getTtsEngineId();
     if (ttsEngineId.startsWith('plugin-')) {
-      const pluginId = ttsEngineId.substring('plugin-'.length);
+      const ref = ttsEngineId.substring('plugin-'.length);
       const normalized = code.startsWith('en') ? 'en' : (code.startsWith('zh') ? 'zh' : code);
-      return bobPluginEngine.langsOf(pluginId).includes(normalized);
+      if (ref.indexOf('#') >= 0) {
+        // Manggo 语音服务：语言支持 = 清单 language 声明（未声明放行）
+        const parts = splitServiceRef(ref);
+        const rec = bobPluginEngine.record(parts.pluginId);
+        if (rec === undefined) {
+          return true;
+        }
+        const svc = parseManggoServices(rec.infoJson).find((m): boolean => m.id === parts.serviceId);
+        if (svc === undefined) {
+          return true;
+        }
+        const declared = manggoServiceLangs(svc.languageJson);
+        return declared.length === 0 ? true : declared.includes(normalized);
+      }
+      return bobPluginEngine.langsOf(ref).includes(normalized);
     }
     return code.startsWith('zh') || code.startsWith('en');
   }
@@ -223,10 +241,12 @@ export class SpeechService {
       if (language.startsWith('en')) {
         hilog.error(0x0001, TAG, 'tts en engine failed, fallback to zh: %{public}s',
           SpeechService.errMsg(e as Object));
+        devLogStore.append('warn', 'tts', 'TTS 英文引擎创建失败，回退中文引擎：' + SpeechService.errMsg(e as Object));
         const fallback = await SpeechService.ensureTts('zh-CN');
         SpeechService.ttsEngines.set(language, fallback);
         return fallback;
       }
+      devLogStore.append('error', 'tts', 'TTS 引擎创建失败：' + SpeechService.errMsg(e as Object));
       throw new Error(SpeechService.errMsg(e as Object));
     }
   }
@@ -238,17 +258,36 @@ export class SpeechService {
    */
   static async speak(text: string, langTag: string, channel: string,
     onStateChange: () => void): Promise<void> {
-    await SpeechService.stopSpeakInternal();
+    // 作废代次：新 speak 或 stopSpeak（页面退出）都会递增，
+    // 合成期间被停止的在途 speak 在音频就绪后直接丢弃，不再播放
+    const epoch = ++SpeechService.speakEpoch;
+    await SpeechService.stopSpeakInternal(false);
 
-    // 语音服务选择为插件时走插件 TTS（tts(query, completion) → url/base64 → AVPlayer）
+    // 语音服务选择为插件时走插件 TTS：
+    // Bob tts(query, completion) / Manggo tts(text, language, options) → 音频数据 → AVPlayer
     const ttsEngineId = settingsStore.getTtsEngineId();
     if (ttsEngineId.startsWith('plugin-')) {
-      const pluginId = ttsEngineId.substring('plugin-'.length);
       if (SpeechService.appCtx === null) {
         throw new Error('应用尚未初始化完成');
       }
-      const pb = await PluginTtsPlayback.speak(SpeechService.appCtx, pluginId, text, langTag,
-        onStateChange);
+      let pb: PluginTtsPlayback;
+      if (ttsEngineId.indexOf('#') >= 0) {
+        pb = await PluginTtsPlayback.speakManggo(SpeechService.appCtx, ttsEngineId, text, langTag,
+          onStateChange);
+      } else {
+        pb = await PluginTtsPlayback.speak(SpeechService.appCtx, ttsEngineId.substring('plugin-'.length),
+          text, langTag, onStateChange);
+      }
+      if (epoch !== SpeechService.speakEpoch) {
+        // 合成期间被停止（页面退出等）：丢弃刚合成的音频，不进入播放
+        try {
+          await pb.stop();
+        } catch (e) {
+          // 已释放等场景忽略
+        }
+        onStateChange();
+        return;
+      }
       SpeechService.playback = pb;
       SpeechService.activeChannel = channel;
       return;
@@ -297,6 +336,15 @@ export class SpeechService {
       } as Record<string, Object>
     };
     await pb.start(onStateChange);
+    if (epoch !== SpeechService.speakEpoch) {
+      // 起播准备期间被停止（页面退出等）：中断合成，不进入 engine.speak
+      try {
+        await pb.stop();
+      } catch (e) {
+        // 已停止等场景忽略
+      }
+      return;
+    }
     engine.speak(text, params);
   }
 
@@ -323,12 +371,15 @@ export class SpeechService {
     return SpeechService.activeChannel;
   }
 
-  /** 停止朗读（对外） */
+  /** 停止朗读（对外）：递增作废代次，使合成中的在途 speak 失效 */
   static stopSpeak(): void {
-    SpeechService.stopSpeakInternal();
+    SpeechService.stopSpeakInternal(true);
   }
 
-  private static async stopSpeakInternal(): Promise<void> {
+  private static async stopSpeakInternal(bumpEpoch: boolean): Promise<void> {
+    if (bumpEpoch) {
+      SpeechService.speakEpoch++;
+    }
     const pb = SpeechService.playback;
     SpeechService.playback = null;
     SpeechService.activeChannel = '';
@@ -343,11 +394,17 @@ export class SpeechService {
     if (SpeechService.asrEngine !== null) {
       return SpeechService.asrEngine;
     }
-    SpeechService.asrEngine = await speechRecognizer.createEngine({
-      language: 'zh-CN',
-      online: 1
-    });
-    return SpeechService.asrEngine;
+    try {
+      SpeechService.asrEngine = await speechRecognizer.createEngine({
+        language: 'zh-CN',
+        online: 1
+      });
+      return SpeechService.asrEngine;
+    } catch (e) {
+      const msg = SpeechService.errMsg(e as Object);
+      devLogStore.append('error', 'asr', '语音识别引擎创建失败：' + msg);
+      throw new Error(msg);
+    }
   }
 
   /**
@@ -392,6 +449,7 @@ export class SpeechService {
       },
       onError: (sid: string, errorCode: number, errorMessage: string) => {
         hilog.error(0x0001, TAG, 'asr onError %{public}d %{public}s', errorCode, errorMessage);
+        devLogStore.append('error', 'asr', `语音识别错误 ${errorCode}：${errorMessage}`);
         SpeechService.activeSessionId = '';
         SpeechService.listening = false;
         const cb = SpeechService.asrOnEnd;

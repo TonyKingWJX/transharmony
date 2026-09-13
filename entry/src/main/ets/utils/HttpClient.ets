@@ -22,6 +22,8 @@ export interface PostOptions {
   url: string;
   headers: Record<string, string>;
   body: string;
+  /** 二进制请求体（base64）：存在时优先于 body，解码为 ArrayBuffer 原样发送（插件二进制上传） */
+  bodyB64?: string;
   /** 超时毫秒数，默认 15s */
   timeoutMs?: number;
   /** 强制 HTTP/1.1。默认协议协商可能走 h2，部分老服务端（Bing/Akamai）对
@@ -63,10 +65,16 @@ function normalizeHeaders(raw: Object | undefined): Record<string, string> {
 export async function postJson(options: PostOptions): Promise<RawResponse> {
   const client = http.createHttp();
   try {
+    // 二进制请求体：base64 解码为 ArrayBuffer 原样发送（插件图片/音频上传）
+    let extra: string | ArrayBuffer = options.body;
+    if (options.bodyB64 !== undefined && options.bodyB64.length > 0) {
+      const u8 = new util.Base64Helper().decodeSync(options.bodyB64);
+      extra = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+    }
     const reqOptions: http.HttpRequestOptions = {
       method: http.RequestMethod.POST,
       header: options.headers,
-      extraData: options.body,
+      extraData: extra,
       expectDataType: http.HttpDataType.STRING,
       connectTimeout: options.timeoutMs ?? 15000,
       readTimeout: options.timeoutMs ?? 15000

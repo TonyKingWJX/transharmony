@@ -20,6 +20,8 @@ export interface ServiceItem {
   enabled: boolean;
   /** 凭证配置（字段key → 值） */
   config: Record<string, string>;
+  /** 是否显示在主页引擎行（仅 manggo 翻译服务参与勾选；undefined = 未参与选择，按显示处理） */
+  selected?: boolean;
 }
 
 interface SerializedService {
@@ -28,6 +30,7 @@ interface SerializedService {
   name: string;
   enabled: string;
   config: Record<string, string>;
+  selected?: string;
 }
 
 /**
@@ -117,7 +120,8 @@ export class SettingsStore {
         defId: defId,
         name: name.length > 0 ? name : defId,
         enabled: getStr(it, 'enabled') !== '0',
-        config: config
+        config: config,
+        selected: getStr(it, 'selected').length > 0 ? getStr(it, 'selected') === '1' : undefined
       });
     }
     return out;
@@ -168,13 +172,17 @@ export class SettingsStore {
           out[k] = v;
         }
       }
-      arr.push({
+      const rec: SerializedService = {
         id: s.id,
         defId: s.defId,
         name: s.name,
         enabled: s.enabled ? '1' : '0',
         config: out
-      });
+      };
+      if (s.selected !== undefined) {
+        rec.selected = s.selected ? '1' : '0';
+      }
+      arr.push(rec);
     }
     // 已删除实例的孤儿资产清理
     for (const alias of Array.from(this.vault.keys())) {
@@ -676,6 +684,15 @@ export class SettingsStore {
 
   setOcrSaveToGallery(v: boolean): Promise<void> {
     return this.put('ocr_save_to_gallery', v);
+  }
+
+  // ---- 开发者模式（关于页连点图标 5 次开启；关闭时入口隐藏、日志系统同步关闭） ----
+  getDevMode(): boolean {
+    return this.pref?.getSync('dev_mode', false) as boolean;
+  }
+
+  setDevMode(v: boolean): Promise<void> {
+    return this.put('dev_mode', v);
   }
 
   // ---- 备份与恢复 ----

@@ -2,8 +2,9 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import pluginHost from 'libpluginhost.so';
 import { PluginInstaller, InstalledPlugin } from './PluginInstaller';
-import { settingsStore } from '../SettingsStore';
+import { settingsStore, ServiceItem } from '../SettingsStore';
 import { LANGUAGE_LIST, LangCode } from '../../models/TranslationTypes';
+import { parseManggoServices, isSupportedManggoService, splitServiceRef } from './ManggoTypes';
 
 /**
  * Bob 翻译插件的运行时管理器：
@@ -58,28 +59,52 @@ class BobPluginEngine {
   private ctx: common.UIAbilityContext | null = null;
   private records: Map<string, InstalledPlugin> = new Map();
   private loaded: Set<string> = new Set();
+  /** 本会话加载过的插件（Env 可能存在；重载前需销毁旧 Env。重启后为空=无 Env 可销毁） */
+  private everLoaded: Set<string> = new Set();
+  /** 加载中的插件（并发去重：聚合/多 chip 场景同一插件的并行 ensureLoaded 复用同一 Promise，
+   *  防止同一段代码重复 eval 进同一 Env 触发 "Identifier has already been declared"） */
+  private loading: Map<string, Promise<void>> = new Map();
   private langs: Map<string, LangCode[]> = new Map();
-  /** 插件流式输出监听（translateStream 期间注册；text 为插件 onStream 的 result JSON） */
-  private streamListeners: Map<string, (resultJson: string) => void> = new Map();
+  /** 插件流式输出监听（按插件多播：同插件多个服务的适配器可同时挂监听，各自过滤服务 id） */
+  private streamListeners: Map<string, Array<(resultJson: string) => void>> = new Map();
 
-  /** TranslateUseCase.bootstrap 注册一次：路由插件 onStream 到对应监听者 */
+  /** TranslateUseCase.bootstrap 注册一次：路由插件 onStream/setResult 到对应监听者 */
   dispatchStream(pluginId: string, resultJson: string): void {
-    const cb = this.streamListeners.get(pluginId);
-    if (cb !== undefined) {
-      try {
-        cb(resultJson);
-      } catch (e) {
-        // 监听者异常不影响运行时
+    const list = this.streamListeners.get(pluginId);
+    if (list !== undefined) {
+      for (const cb of list) {
+        try {
+          cb(resultJson);
+        } catch (e) {
+          // 监听者异常不影响运行时
+        }
       }
     }
   }
 
   setStreamListener(pluginId: string, cb: (resultJson: string) => void): void {
-    this.streamListeners.set(pluginId, cb);
+    let list = this.streamListeners.get(pluginId);
+    if (list === undefined) {
+      list = [];
+      this.streamListeners.set(pluginId, list);
+    }
+    if (!list.includes(cb)) {
+      list.push(cb);
+    }
   }
 
-  clearStreamListener(pluginId: string): void {
-    this.streamListeners.delete(pluginId);
+  clearStreamListener(pluginId: string, cb: (resultJson: string) => void): void {
+    const list = this.streamListeners.get(pluginId);
+    if (list === undefined) {
+      return;
+    }
+    const idx = list.indexOf(cb);
+    if (idx >= 0) {
+      list.splice(idx, 1);
+    }
+    if (list.length === 0) {
+      this.streamListeners.delete(pluginId);
+    }
   }
 
   /** 启动时调用：预载已安装插件清单（EngineRegistry 建引擎前必须完成） */
@@ -116,8 +141,23 @@ class BobPluginEngine {
   /** 加载超时（毫秒）：加载不结算时快速失败，避免 UI 永久转圈 */
   private static readonly LOAD_TIMEOUT_MS: number = 20000;
 
-  /** 确保插件已加载进 JSVM 运行时（幂等；带超时兜底） */
+  /** 确保插件已加载进 JSVM 运行时（幂等 + 并发去重 + 超时兜底） */
   async ensureLoaded(pluginId: string): Promise<void> {
+    if (this.loaded.has(pluginId)) {
+      return;
+    }
+    const inFlight = this.loading.get(pluginId);
+    if (inFlight !== undefined) {
+      return inFlight;
+    }
+    const task = this.doLoad(pluginId).finally((): void => {
+      this.loading.delete(pluginId);
+    });
+    this.loading.set(pluginId, task);
+    return task;
+  }
+
+  private async doLoad(pluginId: string): Promise<void> {
     if (this.loaded.has(pluginId)) {
       return;
     }
@@ -128,20 +168,44 @@ class BobPluginEngine {
     if (rec === undefined) {
       throw new Error('插件未安装: ' + pluginId);
     }
-    const svc = settingsStore.getService(pluginServiceId(pluginId));
-    const values: Record<string, string> = svc !== undefined ? svc.config : {};
     hilog.info(0x0001, 'BobPluginEngine', 'ensureLoaded begin %{public}s', pluginId);
-    const load = PluginInstaller.loadInstalled(this.ctx, rec, values);
-    const timeout = new Promise<string>((_resolve: (v: string) => void,
-      reject: (e: Error) => void): void => {
-      setTimeout((): void => {
-        reject(new Error('插件加载超时，请重试或重启应用'));
-      }, BobPluginEngine.LOAD_TIMEOUT_MS);
-    });
-    await Promise.race([load, timeout]);
-    this.loaded.add(pluginId);
-    hilog.info(0x0001, 'BobPluginEngine', 'ensureLoaded done %{public}s', pluginId);
-    // 语言支持表刷新（尽力而为：失败不影响翻译，仅影响交集过滤精度）
+    let lastErr: Error = new Error('插件加载失败');
+    // 两次机会：失败/超时后强制卸载 Env 重试一次（对齐"重进页面再试就好"的现象）
+    for (let attempt = 0; attempt < 2; attempt++) {
+      // 仅销毁本会话加载过的 Env：全新首载必须先走 initRuntime+Load，
+      // 且绝不能在运行时启动前投递 unload（会插队到 Start 之前，导致 initRuntime 永不结算）
+      if (this.everLoaded.has(pluginId)) {
+        await BobPluginEngine.drainEnv(pluginId);
+      }
+      const load = PluginInstaller.loadInstalled(this.ctx, rec,
+        rec.source === 'manggo' ? undefined : this.bobConfigOverride(pluginId));
+      const timeout = new Promise<string>((_resolve: (v: string) => void,
+        reject: (e: Error) => void): void => {
+        setTimeout((): void => {
+          reject(new Error('插件加载超时，请重试或重启应用'));
+        }, BobPluginEngine.LOAD_TIMEOUT_MS);
+      });
+      try {
+        await Promise.race([load, timeout]);
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error(String(e));
+        hilog.error(0x0001, 'BobPluginEngine', 'load attempt %{public}d failed: %{public}s',
+          attempt + 1, lastErr.message);
+        continue;
+      }
+      this.loaded.add(pluginId);
+      this.everLoaded.add(pluginId);
+      hilog.info(0x0001, 'BobPluginEngine', 'ensureLoaded done %{public}s', pluginId);
+      if (rec.source !== 'manggo') {
+        await this.refreshBobLangs(pluginId);
+      }
+      return;
+    }
+    throw lastErr;
+  }
+
+  /** Bob 加载后的语言支持表刷新（尽力而为：失败仅影响交集过滤精度） */
+  private async refreshBobLangs(pluginId: string): Promise<void> {
     try {
       const raw = await pluginHost.callPluginFn(pluginId, 'supportLanguages', '[]', 'sync', 3000);
       const codes = JSON.parse(raw) as string[];
@@ -153,16 +217,91 @@ class BobPluginEngine {
     }
   }
 
+  private bobConfigOverride(pluginId: string): Record<string, string> {
+    const svc = settingsStore.getService(pluginServiceId(pluginId));
+    return svc !== undefined ? svc.config : {};
+  }
+
+  /** 加载前销毁旧 Env（仅对本会话加载过的插件调用）：先确保运行时已启动
+   *  （unloadPlugin 依赖 worker 消费队列），Env 忙时每 200ms 重试，最多 ~2s 后放行。 */
+  private static async drainEnv(pluginId: string): Promise<void> {
+    try {
+      await pluginHost.initRuntime();
+    } catch (e) {
+      return; // 运行时不可用：由后续 loadPlugin 的报错兜底
+    }
+    for (let i = 0; i < 8; i++) {
+      let res = '';
+      try {
+        res = await pluginHost.unloadPlugin(pluginId);
+      } catch (e) {
+        return;
+      }
+      if (!res.startsWith('plugin busy')) {
+        return; // unloaded / not loaded
+      }
+      await new Promise<void>((resolve: () => void): void => {
+        setTimeout(resolve, 200);
+      });
+    }
+  }
+
   /** 卸载/删除后清理内存态 */
   invalidate(pluginId: string): void {
     this.loaded.delete(pluginId);
+    this.everLoaded.delete(pluginId);
     this.records.delete(pluginId);
     this.langs.delete(pluginId);
   }
 
-  /** 配置变更后强制下次重新加载（预留：插件配置页保存后调用） */
+  /** 配置变更/重装后标记重载：下次 ensureLoaded 时先销毁旧 Env 再全新加载
+   *  （转换后的插件代码含顶层 const/class，向同一 Env 重复 eval 会报 already declared）。
+   *  注意：这里绝不直接投递 unload——运行时未启动时该命令会插队到 Start 之前，
+   *  导致 worker 启动逻辑取不到 Start、initRuntime 永不结算。真正的卸载在 drainEnv 中完成。 */
   invalidateLoaded(pluginId: string): void {
     this.loaded.delete(pluginId);
+  }
+
+  /** 存量迁移：manggo 翻译服务的引擎行勾选（selected）归一化——旧版本安装的记录没有该字段：
+   *  插件仅一个翻译服务 → 勾选；多个 → 全不勾选（用户在插件配置页「引擎行显示」勾选）。 */
+  async normalizeManggoSelection(): Promise<void> {
+    const services = settingsStore.getServices();
+    const transByPlugin: Map<string, ServiceItem[]> = new Map();
+    for (const s of services) {
+      if (!s.defId.startsWith(PLUGIN_DEF_PREFIX) || !s.defId.includes('#') || s.selected !== undefined) {
+        continue;
+      }
+      const parts = splitServiceRef(identifierOfDef(s.defId));
+      const rec = this.records.get(parts.pluginId);
+      if (rec === undefined || rec.source !== 'manggo') {
+        continue;
+      }
+      const svcDef = parseManggoServices(rec.infoJson).find((m): boolean => m.id === parts.serviceId);
+      if (svcDef === undefined || svcDef.kind !== 'translation') {
+        continue;
+      }
+      const group = transByPlugin.get(parts.pluginId);
+      if (group === undefined) {
+        transByPlugin.set(parts.pluginId, [s]);
+      } else {
+        group.push(s);
+      }
+    }
+    if (transByPlugin.size === 0) {
+      return;
+    }
+    let changed = false;
+    transByPlugin.forEach((items: ServiceItem[], pid: string): void => {
+      const def = items.length > 1;
+      for (const item of items) {
+        item.selected = def;
+        changed = true;
+      }
+      hilog.info(0x0001, 'BobPluginEngine', 'normalize selection %{public}s -> %{public}s', pid, String(def));
+    });
+    if (changed) {
+      await settingsStore.setServices(services);
+    }
   }
 }
 

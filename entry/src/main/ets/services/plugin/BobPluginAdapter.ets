@@ -228,7 +228,7 @@ export class BobPluginAdapter implements TranslatorAdapter {
 
   /** 流式翻译：query.onStream 的 result（{toParagraphs}）逐段回传累积文本 */
   async translateStream(req: TranslationRequest, onDelta: (fullText: string) => void): Promise<TranslationResult> {
-    bobPluginEngine.setStreamListener(this.pluginId, (resultJson: string): void => {
+    const listener = (resultJson: string): void => {
       try {
         const parsed = JSON.parse(resultJson) as Record<string, Object>;
         const raw = parsed['toParagraphs'];
@@ -244,11 +244,12 @@ export class BobPluginAdapter implements TranslatorAdapter {
       } catch (e) {
         // 流式增量解析失败忽略，等最终结果
       }
-    });
+    };
+    bobPluginEngine.setStreamListener(this.pluginId, listener);
     try {
       return await this.translate(req);
     } finally {
-      bobPluginEngine.clearStreamListener(this.pluginId);
+      bobPluginEngine.clearStreamListener(this.pluginId, listener);
     }
   }
 }

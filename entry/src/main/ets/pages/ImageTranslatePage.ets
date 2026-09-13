@@ -15,6 +15,8 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { PluginOcrEngine } from '../services/plugin/PluginOcrEngine';
+import { devLogStore } from '../services/DevLogStore';
+import { splitServiceRef } from '../services/plugin/ManggoTypes';
 import {
   AUTO_DETECT,
   LangCode,
@@ -142,15 +144,24 @@ export struct ImageTranslatePage {
       const ocrEngineId = settingsStore.getOcrEngineId();
       let text = '';
       if (ocrEngineId.startsWith('plugin-')) {
-        // 插件 OCR：PixelMap → JPEG base64 → ocr(query, completion)
-        const pluginId = ocrEngineId.substring('plugin-'.length);
-        const packer = image.createImagePacker();
-        const packed = await packer.packToData(pm, { format: 'image/jpeg', quality: 90 });
         const helper = new util.Base64Helper();
-        const imageB64 = helper.encodeToStringSync(new Uint8Array(packed));
-        const info = await pm.getImageInfo();
-        text = await PluginOcrEngine.recognize(pluginId, imageB64,
-          'auto', info.size.width, info.size.height);
+        const ocrRef = ocrEngineId.substring('plugin-'.length);
+        if (ocrRef.indexOf('#') >= 0) {
+          // Manggo 插件 OCR：PixelMap → PNG base64 → recognize(base64, language, options)
+          const parts = splitServiceRef(ocrRef);
+          const packerM = image.createImagePacker();
+          const packedM = await packerM.packToData(pm, { format: 'image/png', quality: 100 });
+          const pngB64 = helper.encodeToStringSync(new Uint8Array(packedM));
+          text = await PluginOcrEngine.recognizeManggo(parts.pluginId, parts.serviceId, pngB64, 'auto');
+        } else {
+          // Bob 插件 OCR：PixelMap → JPEG base64 → ocr(query, completion)
+          const packer = image.createImagePacker();
+          const packed = await packer.packToData(pm, { format: 'image/jpeg', quality: 90 });
+          const imageB64 = helper.encodeToStringSync(new Uint8Array(packed));
+          const info = await pm.getImageInfo();
+          text = await PluginOcrEngine.recognize(ocrRef, imageB64,
+            'auto', info.size.width, info.size.height);
+        }
       } else {
         const visionInfo: textRecognition.VisionInfo = { pixelMap: pm };
         const config: textRecognition.TextRecognitionConfiguration = {
@@ -173,6 +184,7 @@ export struct ImageTranslatePage {
       this.runImgTranslate();
     } catch (e) {
       this.imgErr = '识别失败：' + this.errText(e);
+      devLogStore.append('error', 'ocr', '图片识别失败：' + this.errText(e));
     } finally {
       this.imgOcrRunning = false;
     }
@@ -754,8 +766,10 @@ export struct ImageTranslatePage {
                 .fontSize(15)
                 .fontColor($r('app.color.font_primary'))
                 .backgroundColor(Color.Transparent)
+                  // 官方说明：输入框 left/right padding 为 0 时，光标可能被默认圆角裁剪区截断，显式清零（harmonyos-references/ts-basic-components-textinput）
+                  .borderRadius(0)
                 .constraintSize({ minHeight: 72, maxHeight: 150 })
-                .padding({ left: 0, right: 0, top: 6, bottom: 6 })
+                .padding({ left: 0, right: 0, top: 12, bottom: 6 })
                 .includeFontPadding(true)
                 .width('100%')
                 .onChange((value: string): void => {

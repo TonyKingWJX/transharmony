@@ -21,7 +21,7 @@
 namespace pluginhost {
 
 struct RuntimeCommand {
-    enum Type { Start, Load, Call, ResolveHttp, DeliverStream, WsEvent } type = Start;
+    enum Type { Start, Load, Call, ResolveHttp, DeliverStream, WsEvent, Unload } type = Start;
     uint64_t callId = 0;
     std::string pluginId;
     std::string code;
@@ -30,6 +30,7 @@ struct RuntimeCommand {
     std::string pluginDir;   // Load: 插件安装目录（$file 的只读区 /）
     std::string sandboxDir;  // Load: 插件可写沙箱目录（$file 的 $sandbox/）
     std::string bundleName;  // Load: 包名（native 侧虚拟路径→真实路径解析用）
+    std::string runtimeKind; // Load: 插件运行时类型 'bob'（默认）| 'manggo'（决定注入的 shim）
     std::string fnName;
     std::string argsJson;
     int mode = 0; // 0=sync 1=promise 2=callback
@@ -66,7 +67,9 @@ public:
     void PostLoad(uint64_t callId, const std::string &pluginId, const std::string &code,
                   const std::string &configJson, const std::string &modulesJson,
                   const std::string &pluginDir, const std::string &sandboxDir,
-                  const std::string &bundleName);
+                  const std::string &bundleName, const std::string &runtimeKind);
+    // 主线程调用：销毁插件 Env（配置变更/重装后的干净重载；有挂起 HTTP/定时时拒绝）。
+    void PostUnload(uint64_t callId, const std::string &pluginId);
     void PostCall(uint64_t callId, const std::string &pluginId, const std::string &fnName,
                   const std::string &argsJson, int mode, double timeoutMs);
 

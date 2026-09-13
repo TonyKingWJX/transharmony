@@ -6,12 +6,22 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import pluginHost from 'libpluginhost.so';
 import { bobPluginEngine, toBobLang } from './BobPluginEngine';
+import { devLogStore } from '../DevLogStore';
+import {
+  manggoEntryGlobalName,
+  parseManggoServices,
+  applyManggoLangMap,
+  toManggoLang,
+  splitServiceRef
+} from './ManggoTypes';
 
 /**
  * 插件 TTS 播放（语音服务插件执行层）：
- * 调用插件 tts(query, completion) → Bob tts result {type:'url'|'base64', value} →
- * AVPlayer 播放（url 直连；base64 解码写沙箱临时文件后 fd 播放）。
- * 暂停/继续/停止对齐系统 TTS 播放通道（SpeechPlayback 接口），调用方无感切换。
+ *  - Bob：调用插件 tts(query, completion) → Bob tts result {type:'url'|'base64', value} →
+ *    AVPlayer 播放（url 直连；base64 解码写沙箱临时文件后 fd 播放）；
+ *  - Manggo：调用 tts(text, language, options)（promise 模式）→ 归一化 {__phAudio:{base64}} →
+ *    同样写临时文件后 fd 播放。
+ *  暂停/继续/停止对齐系统 TTS 播放通道（SpeechPlayback 接口），调用方无感切换。
  */
 
 /** 播放通道统一接口（系统 TtsPlayback 与插件播放器共同实现） */
@@ -35,8 +45,19 @@ export class PluginTtsPlayback implements SpeechPlayback {
     return this.paused;
   }
 
-  /** 合成并播放：插件 tts → 音频数据 → AVPlayer */
+  /** 合成并播放：插件 tts → 音频数据 → AVPlayer（错误统一采集日志） */
   static async speak(ctx: common.UIAbilityContext, pluginId: string, text: string,
+    langTag: string, onFinished: () => void): Promise<PluginTtsPlayback> {
+    try {
+      return await PluginTtsPlayback.doSpeak(ctx, pluginId, text, langTag, onFinished);
+    } catch (e) {
+      const msg = (e instanceof Error) ? e.message : String(e);
+      devLogStore.append('error', 'tts', `TTS 失败：${pluginId}：${msg}`);
+      throw new Error(msg);
+    }
+  }
+
+  private static async doSpeak(ctx: common.UIAbilityContext, pluginId: string, text: string,
     langTag: string, onFinished: () => void): Promise<PluginTtsPlayback> {
     await bobPluginEngine.ensureLoaded(pluginId);
     const query: Record<string, string> = {
@@ -70,6 +91,57 @@ export class PluginTtsPlayback implements SpeechPlayback {
     const pb = new PluginTtsPlayback();
     pb.onFinished = onFinished;
     await pb.start(ctx, type, value);
+    return pb;
+  }
+
+  /** Manggo 语音服务合成并播放：engineId = 'plugin-<pid>#<sid>'，langTag 为 BCP 风格标签 */
+  static async speakManggo(ctx: common.UIAbilityContext, engineId: string, text: string,
+    langTag: string, onFinished: () => void): Promise<PluginTtsPlayback> {
+    try {
+      return await PluginTtsPlayback.doSpeakManggo(ctx, engineId, text, langTag, onFinished);
+    } catch (e) {
+      const msg = (e instanceof Error) ? e.message : String(e);
+      devLogStore.append('error', 'tts', `TTS 失败：${engineId}：${msg}`);
+      throw new Error(msg);
+    }
+  }
+
+  private static async doSpeakManggo(ctx: common.UIAbilityContext, engineId: string, text: string,
+    langTag: string, onFinished: () => void): Promise<PluginTtsPlayback> {
+    const parts = splitServiceRef(engineId.substring('plugin-'.length));
+    await bobPluginEngine.ensureLoaded(parts.pluginId);
+    // 语言：BCP 标签主子标签 → 内部码 → manggo 码 → 清单 language 映射（第三方码）
+    const appCode = langTag.indexOf('-') >= 0 ? langTag.substring(0, langTag.indexOf('-')).toLowerCase()
+      : langTag;
+    const rec = bobPluginEngine.record(parts.pluginId);
+    let languageJson = '';
+    if (rec !== undefined) {
+      const svc = parseManggoServices(rec.infoJson).find((m): boolean => m.id === parts.serviceId);
+      languageJson = svc !== undefined ? svc.languageJson : '';
+    }
+    const langArg = applyManggoLangMap(languageJson, toManggoLang(appCode));
+    const raw = await pluginHost.callPluginFn(parts.pluginId, manggoEntryGlobalName(parts.serviceId),
+      JSON.stringify([text, langArg]), 'promise', 60000);
+
+    let parsed: Object;
+    try {
+      parsed = JSON.parse(raw) as Object;
+    } catch (e) {
+      throw new Error('插件 TTS 返回无法解析');
+    }
+    // 启动脚本归一化结果：{__phAudio: {base64, format?}}（未识别的返回已在沙盒内抛错）
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('插件 TTS 返回了不支持的音频数据');
+    }
+    const audio = (parsed as Record<string, Object>)['__phAudio'] as Record<string, Object>;
+    if (audio === undefined || audio === null || typeof audio['base64'] !== 'string'
+      || (audio['base64'] as string).length === 0) {
+      throw new Error('插件未返回有效音频数据');
+    }
+
+    const pb = new PluginTtsPlayback();
+    pb.onFinished = onFinished;
+    await pb.start(ctx, 'base64', audio['base64'] as string);
     return pb;
   }
 

@@ -1,4 +1,5 @@
 import { Context, common } from '@kit.AbilityKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import pluginHost from 'libpluginhost.so';
 import { EngineRegistry } from './EngineRegistry';
 import { BaiduAdapter } from './BaiduAdapter';
@@ -20,6 +21,7 @@ import { WsBridge } from './plugin/WsBridge';
 import { settingsStore, ServiceItem } from './SettingsStore';
 import { historyStore, HistoryItem, NewHistoryItem } from './HistoryStore';
 import { sensitiveFilter } from './SensitiveFilter';
+import { devLogStore } from './DevLogStore';
 import { TransImageStore } from '../utils/TransImageStore';
 import {
   AUTO_DETECT,
@@ -79,7 +81,14 @@ export class TranslateUseCase {
     // 通知 UI：引擎表已就绪（修复冷启动首帧 chip 显示原始 id/服务缺失的竞态）
     AppStorage.setOrCreate('ux_pill_version', Date.now());
     // 插件清单预载：完成后重建引擎并广播（插件 chip 无感补上）
-    bobPluginEngine.preload(context as common.UIAbilityContext).then((): void => {
+    bobPluginEngine.preload(context as common.UIAbilityContext).then(async (): Promise<void> => {
+      // 存量 manggo 记录的引擎行勾选归一化（旧数据无 selected 字段）；失败不阻断引擎表刷新
+      try {
+        await bobPluginEngine.normalizeManggoSelection();
+      } catch (e) {
+        hilog.error(0x0001, 'TranslateUseCase', 'normalizeManggoSelection failed: %{public}s',
+          e instanceof Error ? e.message : String(e));
+      }
       TranslateUseCase.refreshServices();
       AppStorage.setOrCreate('ux_pill_version', Date.now());
     }).catch((e: Object): void => {
@@ -197,19 +206,24 @@ export class TranslateUseCase {
     }
     TranslateUseCase.applyCredentials();
     const start = Date.now();
+    devLogStore.append('info', 'connect', '连通测试：' + adapter.label + '（' + engineId + '）');
     try {
       const req: TranslationRequest = { text: '你好，世界。', from: 'zh', to: 'en' };
-      const result = await adapter.translate(req);
+      // 看门狗：卡死引擎 60s 后判失败，测试连通不永久转圈
+      const result = await TranslateUseCase.watch(adapter.translate(req), (): number => Date.now(), 0, 60000);
       const ms = Date.now() - start;
       if (result.text.trim().length === 0) {
         const empty: TestResult = { ok: false, message: '服务返回了空译文（' + ms + 'ms）' };
+        devLogStore.append('error', 'connect', '连通失败：' + adapter.label + ' 空译文（' + ms + 'ms）');
         return empty;
       }
       const ok: TestResult = { ok: true, message: '连通正常 · ' + ms + 'ms · 译文: ' + result.text.trim() };
+      devLogStore.append('info', 'connect', '连通成功：' + adapter.label + ' ' + ms + 'ms');
       return ok;
     } catch (e) {
       const msg = e instanceof Error ? e.message : '测试失败，请检查网络与凭证';
       const fail: TestResult = { ok: false, message: msg };
+      devLogStore.append('error', 'connect', '连通失败：' + adapter.label + ' 耗时' + (Date.now() - start) + 'ms：' + msg);
       return fail;
     }
   }
@@ -267,9 +281,46 @@ export class TranslateUseCase {
     }
   }
 
+  /** 日志用文本摘要：压平换行、限 60 字符，避免长文本刷爆日志 */
+  private static snippet(text: string): string {
+    const flat = text.replace(/\s+/g, ' ').trim();
+    return flat.length <= 60 ? flat : flat.substring(0, 60) + '…';
+  }
+
+  /**
+   * 引擎看门狗：卡死（无结果/无增量）的引擎不再永久占用翻译流程。
+   * totalMs = 总时长上限（0 = 不限）；gapMs = 两次活动（增量）最大间隔（0 = 不限）。
+   * 超时后底层请求无法真正取消，其迟到结果由调用方的轮次守卫丢弃。
+   */
+  private static watch(work: Promise<TranslationResult>, clock: () => number,
+    gapMs: number, totalMs: number): Promise<TranslationResult> {
+    const startedAt = Date.now();
+    return new Promise<TranslationResult>((resolve: (v: TranslationResult) => void,
+      reject: (e: Error) => void): void => {
+      const timer = setInterval((): void => {
+        const now = Date.now();
+        if (totalMs > 0 && now - startedAt > totalMs) {
+          clearInterval(timer);
+          reject(new Error('翻译服务长时间无响应，已中断，请更换引擎重试'));
+        } else if (gapMs > 0 && now - clock() > gapMs) {
+          clearInterval(timer);
+          reject(new Error('翻译服务长时间无增量，已中断，请更换引擎重试'));
+        }
+      }, 1000);
+      work.then((r: TranslationResult): void => {
+        clearInterval(timer);
+        resolve(r);
+      }, (e: Object): void => {
+        clearInterval(timer);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      });
+    });
+  }
+
   /**
    * 单引擎翻译（含历史写入；图片翻译通过 extra 声明 recordType/meta）。
    * onDelta 可选：引擎支持流式（AI/插件）时逐段回传累积文本，非流式引擎忽略。
+   * 看门狗：非流式 60s 总上限；流式 30s 无增量判死（长流式不受总时长限制）。
    */
   static async translate(text: string, from: string, to: string, engineId: string,
     style: TranslateStyle = 'plain', extra?: TranslateExtra,
@@ -277,16 +328,34 @@ export class TranslateUseCase {
     await TranslateUseCase.guardSensitive(text);
     const adapter = EngineRegistry.byId(engineId);
     if (adapter === undefined) {
+      devLogStore.append('error', 'translate', '请求失败：未知翻译服务 ' + engineId);
       return Promise.reject(new Error('未知翻译服务: ' + engineId));
     }
     TranslateUseCase.applyCredentials();
     const req: TranslationRequest = { text: text, from: from, to: to, style: style };
+    const startTs = Date.now();
+    const engineName = adapter.label + '（' + engineId + '）';
+    devLogStore.append('info', 'translate', '请求：' + engineName + ' ' + from + '→' + to +
+      ' "' + TranslateUseCase.snippet(text) + '"');
     let result: TranslationResult;
-    if (onDelta !== undefined && adapter.translateStream !== undefined) {
-      result = await adapter.translateStream(req, onDelta);
-    } else {
-      result = await adapter.translate(req);
+    try {
+      if (onDelta !== undefined && adapter.translateStream !== undefined) {
+        let lastBeat = Date.now();
+        const work = adapter.translateStream(req, (fullText: string): void => {
+          lastBeat = Date.now(); // 有增量 = 引擎活着，重置卡死判定
+          onDelta(fullText);
+        });
+        result = await TranslateUseCase.watch(work, (): number => lastBeat, 30000, 0);
+      } else {
+        const work = adapter.translate(req);
+        result = await TranslateUseCase.watch(work, (): number => Date.now(), 0, 60000);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      devLogStore.append('error', 'translate', '翻译失败：' + engineName + ' 耗时' + (Date.now() - startTs) + 'ms：' + msg);
+      throw new Error(msg);
     }
+    devLogStore.append('info', 'translate', '翻译成功：' + engineName + ' 耗时' + (Date.now() - startTs) + 'ms');
     await TranslateUseCase.saveHistory(text, result, adapter.id, from, to, extra);
     return result;
   }
@@ -319,6 +388,13 @@ export class TranslateUseCase {
     // 不覆盖当前语言对的引擎不进并发名单（离线引擎非中英对时静默跳过）
     const runnable = engineIds.filter((id: string): boolean =>
       TranslateUseCase.supportsPair(id, from, to));
+    const aggLabels: string[] = [];
+    for (const id of runnable) {
+      const ad = EngineRegistry.byId(id);
+      aggLabels.push(ad !== undefined ? ad.label : id);
+    }
+    devLogStore.append('info', 'translate', '聚合请求：' + runnable.length + ' 个引擎（' + aggLabels.join('、') + '）' +
+      ' ' + from + '→' + to + ' "' + TranslateUseCase.snippet(text) + '"');
     const items: AggregateItem[] = [];
     for (const id of runnable) {
       const adapter = EngineRegistry.byId(id);
@@ -342,7 +418,8 @@ export class TranslateUseCase {
           throw new Error('未知翻译服务');
         }
         const req: TranslationRequest = { text: text, from: from, to: to, style: style };
-        const result = await adapter.translate(req);
+        // 单引擎卡死不拖垮聚合：60s 无结果按该引擎失败计，其余引擎与整体流程照常
+        const result = await TranslateUseCase.watch(adapter.translate(req), (): number => Date.now(), 0, 60000);
         items[idx] = {
           engineId: id,
           label: adapter.label,
@@ -352,6 +429,7 @@ export class TranslateUseCase {
           elapsedMs: Date.now() - start,
           error: ''
         };
+        devLogStore.append('info', 'translate', '聚合·' + adapter.label + ' 成功 耗时' + (Date.now() - start) + 'ms');
       } catch (e) {
         const msg = e instanceof Error ? e.message : '翻译失败，请检查网络后重试';
         items[idx] = {
@@ -363,6 +441,8 @@ export class TranslateUseCase {
           elapsedMs: Date.now() - start,
           error: msg
         };
+        devLogStore.append('error', 'translate', '聚合·' + (adapter !== undefined ? adapter.label : id) +
+          ' 失败 耗时' + (Date.now() - start) + 'ms：' + msg);
       }
       onUpdate(items.slice());
     });
@@ -390,6 +470,10 @@ export class TranslateUseCase {
       }
       const s = settingsStore.getService(a.id);
       if (s === undefined || !s.enabled) {
+        continue;
+      }
+      // manggo 多服务插件：未勾选（selected=false）的服务不参与聚合/回退
+      if (s.selected === false) {
         continue;
       }
       if (TranslateUseCase.isConfigured(a.id)) {

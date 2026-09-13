@@ -93,6 +93,155 @@ function __phRunCallback(callId, fn, argsJson) {
         fn.apply(null, args);
     } catch (e) { __phFail(callId, e); }
 }
+
+// ---- URL / URLSearchParams（浏览器/Node/Bun 标准全局；manggo 免费包等插件常用）----
+// 纯 JS 实现：scheme://host[:port]/path?query#hash（userinfo 忽略，相对地址带 base 时按目录合并）
+function __phUrlEncode(s) {
+    return encodeURIComponent(String(s)).replace(/[!'()*]/g, function (c) {
+        return '%' + c.charCodeAt(0).toString(16).toUpperCase();
+    });
+}
+function __phUrlDecode(s) {
+    var r = String(s).replace(/\+/g, ' ');
+    try { return decodeURIComponent(r); } catch (e) { return r; }
+}
+function URLSearchParams(init) {
+    this._params = [];
+    if (typeof init === 'string') {
+        var q = init.charAt(0) === '?' ? init.substring(1) : init;
+        var segs = q.split('&');
+        for (var i = 0; i < segs.length; i++) {
+            if (segs[i].length === 0) { continue; }
+            var eq = segs[i].indexOf('=');
+            var k = eq < 0 ? segs[i] : segs[i].substring(0, eq);
+            var v = eq < 0 ? '' : segs[i].substring(eq + 1);
+            this._params.push([__phUrlDecode(k), __phUrlDecode(v)]);
+        }
+    } else if (init !== null && init !== undefined && typeof init === 'object') {
+        if (init instanceof URLSearchParams) {
+            for (var j = 0; j < init._params.length; j++) { this._params.push(init._params[j].slice()); }
+        } else if (init.length !== undefined && typeof init.length === 'number') {
+            // [ [k, v], ... ] 序列
+            for (var p = 0; p < init.length; p++) {
+                var e = init[p];
+                if (e !== null && e !== undefined && e.length >= 2) { this._params.push([String(e[0]), String(e[1])]); }
+            }
+        } else {
+            for (var key in init) {
+                if (Object.prototype.hasOwnProperty.call(init, key)) { this._params.push([String(key), String(init[key])]); }
+            }
+        }
+    }
+}
+URLSearchParams.prototype.append = function (k, v) { this._params.push([String(k), String(v)]); };
+URLSearchParams.prototype.delete = function (k) {
+    var out = [];
+    for (var i = 0; i < this._params.length; i++) { if (this._params[i][0] !== String(k)) { out.push(this._params[i]); } }
+    this._params = out;
+};
+URLSearchParams.prototype.get = function (k) {
+    for (var i = 0; i < this._params.length; i++) { if (this._params[i][0] === String(k)) { return this._params[i][1]; } }
+    return null;
+};
+URLSearchParams.prototype.getAll = function (k) {
+    var out = [];
+    for (var i = 0; i < this._params.length; i++) { if (this._params[i][0] === String(k)) { out.push(this._params[i][1]); } }
+    return out;
+};
+URLSearchParams.prototype.has = function (k) { return this.get(k) !== null; };
+URLSearchParams.prototype.set = function (k, v) {
+    k = String(k); v = String(v);
+    var replaced = false;
+    var out = [];
+    for (var i = 0; i < this._params.length; i++) {
+        if (this._params[i][0] === k) {
+            if (!replaced) { out.push([k, v]); replaced = true; }
+        } else { out.push(this._params[i]); }
+    }
+    if (!replaced) { out.push([k, v]); }
+    this._params = out;
+};
+URLSearchParams.prototype.forEach = function (cb, thisArg) {
+    for (var i = 0; i < this._params.length; i++) { cb.call(thisArg, this._params[i][1], this._params[i][0], this); }
+};
+URLSearchParams.prototype.toString = function () {
+    var out = [];
+    for (var i = 0; i < this._params.length; i++) { out.push(__phUrlEncode(this._params[i][0]) + '=' + __phUrlEncode(this._params[i][1])); }
+    return out.join('&');
+};
+function __phParseUrl(input, base) {
+    var m = /^([A-Za-z][A-Za-z0-9+.\-]*):\/\/([^\/?#]*)([^?#]*)(\?[^#]*)?(#.*)?$/.exec(input);
+    if (m === null) {
+        // 相对地址 + base：取 base 的目录拼路径（仅覆盖插件常用形态）
+        if (base !== undefined) {
+            var bm = /^([A-Za-z][A-Za-z0-9+.\-]*):\/\/([^\/?#]*)([^?#]*)/.exec(String(base));
+            if (bm !== null) {
+                var dir = bm[3];
+                var cut = dir.lastIndexOf('/');
+                if (cut >= 0) { dir = dir.substring(0, cut + 1); }
+                else { dir = '/'; }
+                return __phParseUrl(bm[1] + '://' + bm[2] + dir + input, undefined);
+            }
+        }
+        return null;
+    }
+    var authority = m[2];
+    var atIdx = authority.lastIndexOf('@');
+    if (atIdx >= 0) { authority = authority.substring(atIdx + 1); }
+    var hostname = authority;
+    var port = '';
+    var colon = authority.lastIndexOf(':');
+    if (colon >= 0 && /^[0-9]+$/.test(authority.substring(colon + 1))) {
+        hostname = authority.substring(0, colon);
+        port = authority.substring(colon + 1);
+    }
+    hostname = hostname.toLowerCase();
+    // 默认端口归一（官方 URL 行为）：https:443 / http:80 从 host 剥离
+    var scheme = m[1].toLowerCase();
+    if ((scheme === 'https' && port === '443') || (scheme === 'http' && port === '80')) { port = ''; }
+    return {
+        protocol: scheme + ':',
+        hostname: hostname,
+        port: port,
+        host: hostname + (port === '' ? '' : ':' + port),
+        pathname: m[3] === '' ? '/' : m[3],
+        hash: m[5] || ''
+    };
+}
+function URL(url, base) {
+    var parsed = __phParseUrl(String(url), base !== undefined ? String(base) : undefined);
+    if (parsed === null) { throw new TypeError('Invalid URL: ' + String(url)); }
+    this._p = parsed;
+    var q = __phParseUrl.QUERY.exec(String(url));
+    this._sp = new URLSearchParams(q !== null ? q[1] : '');
+}
+__phParseUrl.QUERY = /\?([^#]*)/;
+Object.defineProperty(URL.prototype, 'href', {
+    get: function () { return this.toString(); }
+});
+Object.defineProperty(URL.prototype, 'origin', {
+    get: function () { return this._p.protocol + '//' + this._p.host; }
+});
+Object.defineProperty(URL.prototype, 'searchParams', {
+    get: function () { return this._sp; }
+});
+Object.defineProperty(URL.prototype, 'search', {
+    get: function () {
+        var s = this._sp.toString();
+        return s === '' ? '' : '?' + s;
+    }
+});
+Object.defineProperty(URL.prototype, 'username', { get: function () { return ''; } });
+Object.defineProperty(URL.prototype, 'password', { get: function () { return ''; } });
+['protocol', 'host', 'hostname', 'port', 'pathname', 'hash'].forEach(function (prop) {
+    Object.defineProperty(URL.prototype, prop, {
+        get: function () { return this._p[prop]; }
+    });
+});
+URL.prototype.toString = function () {
+    return this._p.protocol + '//' + this._p.host + this._p.pathname + this.search + this._p.hash;
+};
+URL.prototype.toJSON = function () { return this.toString(); };
 )JS";
 
 // Bob 插件运行时 shim：按 bobtranslate.com 官方 API 契约重建 Bob 全局。
@@ -598,6 +747,532 @@ var __phCryptoJS = {
 };
 __phBuiltinModules['crypto-js'] = function (module, exports) {
     module.exports = __phCryptoJS;
+};
+)JS";
+
+// manggo 插件启动脚本（Manggo 兼容，API manggo.plugin.v1）：替代 Bob shim 注入。
+// 不提供 Bob 全局（$data/$http 等）；manggo 约定 utils 经 options.utils 传入入口函数。
+// 提供：UTF-8/Base64 工具、console/btoa/atob/定时器/TextEncoder polyfill、
+// options.utils（fetch/readTextFile/readBinaryFile/cacheDir/pluginDir/osType/setResult）、
+// __phManggoRegister（服务入口包装：构造 options 并以 promise 语义返回；speech 附加音频归一化）。
+const char *kManggoBootstrap = R"JS(
+var __phCfg = (typeof __phHostConfig === 'undefined') ? {} : __phHostConfig;
+// 各服务的配置值（ArkTS 按清单 config 表单组装：{<serviceId>: {<key>: value}}）
+var __phManggoServices = __phCfg.services || {};
+
+// ---- UTF-8 / Base64 纯 JS 工具（裸 JSVM 无 TextEncoder/btoa）----
+function __phUtf8Encode(str) {
+    var out = [];
+    for (var i = 0; i < str.length; i++) {
+        var c = str.codePointAt(i);
+        if (c > 0xFFFF) i++;
+        if (c < 0x80) out.push(c);
+        else if (c < 0x800) out.push(0xC0 | (c >> 6), 0x80 | (c & 63));
+        else if (c < 0x10000) out.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+        else out.push(0xF0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+    return out;
+}
+function __phUtf8Decode(bytes) {
+    var out = '';
+    var i = 0;
+    while (i < bytes.length) {
+        var b = bytes[i];
+        var cp = b;
+        if (b < 0x80) { i += 1; }
+        else if (b < 0xE0) { cp = ((b & 31) << 6) | (bytes[i + 1] & 63); i += 2; }
+        else if (b < 0xF0) { cp = ((b & 15) << 12) | ((bytes[i + 1] & 63) << 6) | (bytes[i + 2] & 63); i += 3; }
+        else { cp = ((b & 7) << 18) | ((bytes[i + 1] & 63) << 12) | ((bytes[i + 2] & 63) << 6) | (bytes[i + 3] & 63); i += 4; }
+        out += String.fromCodePoint(cp);
+    }
+    return out;
+}
+var __phB64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+function __phB64Encode(bytes) {
+    var out = '';
+    for (var i = 0; i < bytes.length; i += 3) {
+        var b1 = bytes[i], b2 = i + 1 < bytes.length ? bytes[i + 1] : 0, b3 = i + 2 < bytes.length ? bytes[i + 2] : 0;
+        out += __phB64[b1 >> 2] + __phB64[((b1 & 3) << 4) | (b2 >> 4)];
+        out += i + 1 < bytes.length ? __phB64[((b2 & 15) << 2) | (b3 >> 6)] : '=';
+        out += i + 2 < bytes.length ? __phB64[b3 & 63] : '=';
+    }
+    return out;
+}
+function __phB64Decode(s) {
+    s = String(s).replace(/[^A-Za-z0-9+/]/g, '');
+    var out = [];
+    for (var i = 0; i < s.length; i += 4) {
+        var n = (__phB64.indexOf(s[i]) << 18) | (__phB64.indexOf(s[i + 1]) << 12);
+        if (s[i + 2] !== undefined) n |= __phB64.indexOf(s[i + 2]) << 6;
+        if (s[i + 3] !== undefined) n |= __phB64.indexOf(s[i + 3]);
+        out.push((n >> 16) & 255);
+        if (s[i + 2] !== undefined) out.push((n >> 8) & 255);
+        if (s[i + 3] !== undefined) out.push(n & 255);
+    }
+    return out;
+}
+
+// ---- console / btoa / atob / 定时器 / TextEncoder / TextDecoder（插件常用 polyfill）----
+function __phToString(o) {
+    if (o === undefined) return 'undefined';
+    if (o === null) return 'null';
+    return String(o);
+}
+function __phArgsJoin(args) {
+    var parts = [];
+    for (var i = 0; i < args.length; i++) { parts.push(__phToString(args[i])); }
+    return parts.join(' ');
+}
+var console = {
+    log: function () { nativeLog('info', __phArgsJoin(arguments)); },
+    info: function () { nativeLog('info', __phArgsJoin(arguments)); },
+    debug: function () { nativeLog('info', __phArgsJoin(arguments)); },
+    warn: function () { nativeLog('info', __phArgsJoin(arguments)); },
+    error: function () { nativeLog('error', __phArgsJoin(arguments)); }
+};
+function btoa(s) {
+    s = String(s);
+    var bytes = [];
+    for (var i = 0; i < s.length; i++) {
+        var c = s.charCodeAt(i);
+        if (c > 255) { throw new Error('InvalidCharacterError: btoa 输入包含 Latin1 范围之外的字符'); }
+        bytes.push(c);
+    }
+    return __phB64Encode(bytes);
+}
+function atob(s) {
+    var bytes = __phB64Decode(String(s));
+    var out = '';
+    for (var i = 0; i < bytes.length; i++) { out += String.fromCharCode(bytes[i]); }
+    return out;
+}
+var __phTimeouts = {};
+var __phTimeoutSeq = 1000000;
+function setTimeout(fn, ms) {
+    var id = __phTimeoutSeq++;
+    var rest = Array.prototype.slice.call(arguments, 2);
+    __phTimeouts[id] = fn;
+    nativeAfter(id, Math.max(1, ms || 0)).then(function () {
+        var f = __phTimeouts[id];
+        if (!f) { return; }
+        delete __phTimeouts[id];
+        try { f.apply(null, rest); } catch (e) { nativeLog('error', 'setTimeout handler: ' + e); }
+    });
+    return id;
+}
+function clearTimeout(id) { delete __phTimeouts[id]; }
+function TextEncoder() {}
+TextEncoder.prototype.encode = function (s) { return new Uint8Array(__phUtf8Encode(String(s))); };
+function TextDecoder() {}
+TextDecoder.prototype.decode = function (u8) { return __phUtf8Decode(Array.prototype.slice.call(u8)); };
+
+// ---- options.utils（manggo.plugin.v1 约定）----
+// 路径：'$sandbox/...' → 可写缓存区；'/...' 或相对路径 → 插件安装目录（native ResolveVirtual 解析）
+function __phManggoPath(p) {
+    p = String(p || '');
+    if (p.indexOf('$sandbox') === 0) { return p; }
+    if (p.length > 0 && p.charAt(0) === '/') { return p; }
+    return '/' + p;
+}
+function __phManggoReadBytes(p) {
+    return __phB64Decode(nativeFileOp('read', __phManggoPath(p)));
+}
+function __phManggoToB64(v) {
+    var bytes = null;
+    if (v instanceof ArrayBuffer) { bytes = new Uint8Array(v); }
+    else if (ArrayBuffer.isView(v)) { bytes = new Uint8Array(v.buffer, v.byteOffset, v.byteLength); }
+    else if (Array.isArray(v)) { bytes = v; }
+    return bytes === null ? null : __phB64Encode(bytes);
+}
+// ---- 流式 fetch 的 SSE 增量通道：Accept 含 text/event-stream 的请求走桥的流式路径，
+//      增量经 native DeliverStream 回放进 __phStreamDeliver（manggo 版，一次一个活跃流） ----
+var __phManggoStreamQueue = null;
+function __phStreamDeliver(text) {
+    var q = __phManggoStreamQueue;
+    if (q !== null) {
+        q.chunks.push(String(text));
+        q.collected += String(text);
+        if (q.notify !== null) { var n = q.notify; q.notify = null; n(); }
+    }
+}
+function __phManggoFetch(url, init) {
+    var i = init || {};
+    var method = String(i.method || 'GET').toUpperCase();
+    var header = {};
+    var h = i.headers;
+    if (h) {
+        if (Array.isArray(h)) {
+            for (var k = 0; k < h.length; k++) { header[String(h[k][0])] = String(h[k][1]); }
+        } else if (typeof h === 'object') {
+            for (var key in h) {
+                if (Object.prototype.hasOwnProperty.call(h, key)) { header[String(key)] = String(h[key]); }
+            }
+        }
+    }
+    var body = '';
+    var bodyB64 = null;
+    var b = i.body;
+    if (b !== undefined && b !== null) {
+        if (typeof b === 'string') { body = b; }
+        else if (typeof b === 'object') {
+            var bytes = null;
+            if (b instanceof ArrayBuffer) { bytes = new Uint8Array(b); }
+            else if (ArrayBuffer.isView(b)) { bytes = new Uint8Array(b.buffer, b.byteOffset, b.byteLength); }
+            // 二进制请求体：base64 透传（宿主桥解码为 ArrayBuffer 原样发送），避免按文本近似损坏
+            if (bytes !== null) { bodyB64 = __phB64Encode(bytes); }
+            else { body = JSON.stringify(b); }
+        }
+    }
+    // SSE 判定：Accept 头含 text/event-stream → 走桥的流式通道（增量实时；最终 envelope body 为空）
+    var accept = (header['Accept'] !== undefined ? header['Accept'] : (header['accept'] !== undefined ? header['accept'] : ''));
+    var isSse = String(accept).toLowerCase().indexOf('text/event-stream') >= 0;
+    var envelope = { url: String(url), method: method, header: header, body: body, timeout: 60 };
+    if (bodyB64 !== null) { envelope.bodyB64 = bodyB64; }
+    var queue = null;
+    if (isSse) {
+        envelope.stream = true;
+        queue = { chunks: [], collected: '', done: false, notify: null };
+        __phManggoStreamQueue = queue;
+    }
+    return nativeHttp(JSON.stringify(envelope)).then(function (rawStr) {
+        if (queue !== null) {
+            queue.done = true;
+            if (queue.notify !== null) { var n0 = queue.notify; queue.notify = null; n0(); }
+            if (__phManggoStreamQueue === queue) { __phManggoStreamQueue = null; }
+        }
+        var raw = {};
+        try { raw = JSON.parse(rawStr); } catch (e) { raw = {}; }
+        var status = (typeof raw.status === 'number') ? raw.status : 0;
+        var rawHeaders = (raw.headers !== undefined && raw.headers !== null) ? raw.headers : {};
+        // Headers 风格（get/has 大小写不敏感）+ 兼容对象式访问 headers['content-type']
+        var lower = {};
+        var headersLike = {};
+        for (var hk in rawHeaders) {
+            if (!Object.prototype.hasOwnProperty.call(rawHeaders, hk)) { continue; }
+            var v = String(rawHeaders[hk]);
+            headersLike[hk] = v;
+            lower[hk.toLowerCase()] = v;
+        }
+        headersLike.get = function (name) {
+            var kk = lower[String(name).toLowerCase()];
+            return kk === undefined ? null : kk;
+        };
+        headersLike.has = function (name) { return lower[String(name).toLowerCase()] !== undefined; };
+        // 正文：流式 = 已收增量拼接（最终 envelope body 为空）；非流式 = envelope body
+        var bodyText = queue !== null ? queue.collected + String(raw.body || '') : String(raw.body || '');
+        var finalBytes = __phUtf8Encode(bodyText);
+        var replayOffset = 0;
+        var response = {
+            ok: status >= 200 && status < 300,
+            status: status,
+            statusText: '',
+            headers: headersLike,
+            url: String(url),
+            text: function () { return Promise.resolve(bodyText); },
+            json: function () { return Promise.resolve(JSON.parse(bodyText)); },
+            arrayBuffer: function () {
+                var buf = new ArrayBuffer(finalBytes.length);
+                var view = new Uint8Array(buf);
+                for (var j = 0; j < finalBytes.length; j++) { view[j] = finalBytes[j]; }
+                return Promise.resolve(buf);
+            }
+        };
+        response.body = {
+            getReader: function () {
+                var myOffset = 0;
+                return {
+                    read: function () {
+                        return new Promise(function (resolve) {
+                            function next() {
+                                // SSE 模式：只消费增量队列（最终 envelope body 为空，不回放避免重复）
+                                if (queue !== null) {
+                                    if (queue.chunks.length > 0) {
+                                        var c = queue.chunks.shift();
+                                        resolve({ done: false, value: new Uint8Array(__phUtf8Encode(c)) });
+                                        return;
+                                    }
+                                    if (!queue.done) {
+                                        queue.notify = next; // 等下一个增量
+                                        return;
+                                    }
+                                    resolve({ done: true, value: undefined });
+                                    return;
+                                }
+                                // 非流式：把最终正文按块回放（满足 body.getReader() 消费习惯）
+                                if (myOffset < finalBytes.length) {
+                                    var end = Math.min(myOffset + 65536, finalBytes.length);
+                                    var part = finalBytes.slice(myOffset, end);
+                                    myOffset = end;
+                                    resolve({ done: false, value: new Uint8Array(part) });
+                                    return;
+                                }
+                                resolve({ done: true, value: undefined });
+                            }
+                            next();
+                        });
+                    },
+                    cancel: function () { replayOffset = finalBytes.length; }
+                };
+            }
+        };
+        return response;
+    }, function (errStr) {
+        if (queue !== null) {
+            queue.done = true;
+            if (__phManggoStreamQueue === queue) { __phManggoStreamQueue = null; }
+        }
+        var msg = String(errStr);
+        try { var e = JSON.parse(msg); msg = e.message || msg; } catch (x) {}
+        throw new Error('fetch failed: ' + msg);
+    });
+}
+var __phManggoUtils = {
+    fetch: __phManggoFetch,
+    readTextFile: function (p) { return Promise.resolve(__phUtf8Decode(__phManggoReadBytes(p))); },
+    readBinaryFile: function (p) { return Promise.resolve(__phManggoReadBytes(p)); },
+    cacheDir: '$sandbox',
+    pluginDir: '/',
+    osType: 'Linux',
+    setResult: function (chunk) {
+        // 流式增量：包装为 {__manggoDelta} 信封，宿主按 delta 语义消费
+        nativeStreamText(JSON.stringify({ __manggoDelta: String(chunk) }));
+    }
+};
+// Bun 习惯：fetch 亦为全局（与 options.utils.fetch 同一实现）
+var fetch = __phManggoFetch;
+
+// ---- 服务入口包装：options 构造 + speech 音频归一化 ----
+function __phManggoOptions(cfg, detect, serviceId) {
+    return {
+        config: cfg || {},
+        detect: (typeof detect === 'string') ? detect : null,
+        // 流式增量携带服务 id：同插件多服务并发流式时宿主按服务路由，互不串流
+        setResult: function (chunk) {
+            nativeStreamText(JSON.stringify({ __manggoSvc: String(serviceId || ''), __manggoDelta: String(chunk) }));
+        },
+        utils: __phManggoUtils
+    };
+}
+// TTS 返回归一化：Uint8Array/ArrayBuffer/byte[]/base64 字符串/{base64|bytes|data|audio, format?}
+// → {__phAudio: {base64, format}}（统一 JSON 可序列化，宿主解码播放）
+function __phManggoAudioOut(r) {
+    if (r === undefined || r === null) { throw new Error('TTS 未返回音频数据'); }
+    var fmt = null;
+    var payload = null;
+    if (typeof r === 'string') { payload = r; }
+    else if (r instanceof ArrayBuffer || ArrayBuffer.isView(r)) { payload = __phManggoToB64(r); }
+    else if (Array.isArray(r)) { payload = __phManggoToB64(r); }
+    else if (typeof r === 'object') {
+        fmt = r.format || r.audioFormat || r.responseFormat || r.mimeType || r.contentType || null;
+        var v = (r.base64 !== undefined) ? r.base64
+            : ((r.data !== undefined) ? r.data : ((r.audio !== undefined) ? r.audio : r.bytes));
+        if (typeof v === 'string') { payload = v; }
+        else if (v !== undefined && v !== null) { payload = __phManggoToB64(v); }
+    }
+    if (payload === null || payload.length === 0) { throw new Error('TTS 返回了无法识别的音频数据'); }
+    return { __phAudio: { base64: payload, format: fmt } };
+}
+function __phManggoWrap(fn, cfg, isSpeech, serviceId) {
+    return function () {
+        var args = Array.prototype.slice.call(arguments);
+        // 翻译服务宿主实参为 [text, from, to, detect]：detect 收进 options.detect，
+        // options 占住插件声明的最后一个形参位（translate 为第 4 参；ocr/tts 为第 3 参）
+        var detect = (args.length >= 4 && typeof args[3] === 'string') ? args[3] : undefined;
+        var options = __phManggoOptions(cfg, detect, serviceId);
+        if (args.length >= 4) { args[3] = options; } else { args.push(options); }
+        var call = Promise.resolve().then(function () { return fn.apply(null, args); });
+        if (!isSpeech) { return call; }
+        return call.then(function (r) { return __phManggoAudioOut(r); });
+    };
+}
+// 服务入口注册（ArkTS 侧按清单生成的注册代码逐服务调用）：
+// 入口包装后挂到全局 __phSvc_<serviceId>，宿主以 callPluginFn(fnName='__phSvc_<serviceId>', mode='promise') 调用
+function __phManggoRegister(serviceId, kind, entryFn, cfg) {
+    var key = '__phSvc_' + String(serviceId).replace(/[^A-Za-z0-9_]/g, '_');
+    if (typeof entryFn !== 'function') {
+        nativeLog('error', 'manggo service entry missing: ' + serviceId + ' (' + kind + ')');
+        return;
+    }
+    globalThis[key] = __phManggoWrap(entryFn, cfg || {}, kind === 'speech', String(serviceId));
+}
+
+// ---- ESM import 重写的运行时支撑：默认导入的 CJS 互操作 + 绑定版 require ----
+// 注意：__phRequire 是柯里化工厂（__phRequire(curKey) 返回绑定的 require），转换层生成的
+// import 重写代码一律调用 __phModRequire（等价于模块系统暴露的全局 require）。
+function __phInterop(m) {
+    return (m !== null && typeof m === 'object' && m.default !== undefined) ? m.default : m;
+}
+var __phModRequire = (typeof __phRequire === 'function') ? __phRequire('main.js')
+    : function (p) { throw new Error('module system unavailable: ' + p); };
+
+// ---- node:crypto 内置模块（宿主 JSVM 无 node 内建；覆盖常用哈希 createHash）----
+function __phHexBytes(bytes) {
+    var out = '';
+    for (var i = 0; i < bytes.length; i++) {
+        var h = bytes[i].toString(16);
+        out += h.length < 2 ? '0' + h : h;
+    }
+    return out;
+}
+function __phMd5M(bytes) {
+    var s = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+             5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+             4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+             6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21];
+    var K = [];
+    for (var i = 0; i < 64; i++) { K[i] = (Math.abs(Math.sin(i + 1)) * 4294967296) | 0; }
+    var H = [1732584193, -271733879, -1732584194, 271733878];
+    var msg = bytes.slice();
+    msg.push(0x80);
+    while (msg.length % 64 !== 56) { msg.push(0); }
+    var bitLen = bytes.length * 8;
+    msg.push(bitLen & 255, (bitLen >>> 8) & 255, (bitLen >>> 16) & 255, (bitLen >>> 24) & 255, 0, 0, 0, 0);
+    for (var off = 0; off < msg.length; off += 64) {
+        var M = [];
+        for (var j = 0; j < 16; j++) {
+            M[j] = msg[off + j * 4] | (msg[off + j * 4 + 1] << 8) | (msg[off + j * 4 + 2] << 16) | (msg[off + j * 4 + 3] << 24);
+        }
+        var A = H[0], B = H[1], C = H[2], D = H[3];
+        for (var r = 0; r < 64; r++) {
+            var F, g;
+            if (r < 16) { F = (B & C) | (~B & D); g = r; }
+            else if (r < 32) { F = (D & B) | (~D & C); g = (5 * r + 1) % 16; }
+            else if (r < 48) { F = B ^ C ^ D; g = (3 * r + 5) % 16; }
+            else { F = C ^ (B | ~D); g = (7 * r) % 16; }
+            F = (F + A + K[r] + M[g]) | 0;
+            A = D; D = C; C = B;
+            B = (B + ((F << s[r]) | (F >>> (32 - s[r])))) | 0;
+        }
+        H[0] = (H[0] + A) | 0; H[1] = (H[1] + B) | 0; H[2] = (H[2] + C) | 0; H[3] = (H[3] + D) | 0;
+    }
+    var out = [];
+    for (var q = 0; q < 4; q++) {
+        out.push(H[q] & 255, (H[q] >>> 8) & 255, (H[q] >>> 16) & 255, (H[q] >>> 24) & 255);
+    }
+    return out;
+}
+function __phSha1(msg) {
+    var ml = msg.length;
+    var words = [];
+    for (var i = 0; i < ml; i++) {
+        words[i >> 2] = (words[i >> 2] || 0) | (msg[i] << (24 - (i % 4) * 8));
+    }
+    words[ml >> 2] = (words[ml >> 2] || 0) | (0x80 << (24 - (ml % 4) * 8));
+    var nwords = (((ml + 8) >> 6) + 1) * 16;
+    for (var i = (ml >> 2) + 1; i < nwords; i++) { words[i] = words[i] || 0; }
+    words[nwords - 1] = ml * 8;
+    var H = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
+    var w = new Array(80);
+    for (var j = 0; j < nwords; j += 16) {
+        var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4];
+        for (var i = 0; i < 80; i++) {
+            if (i < 16) { w[i] = words[j + i] | 0; }
+            else {
+                var x = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16];
+                w[i] = (x << 1) | (x >>> 31);
+            }
+            var f, k;
+            if (i < 20) { f = (b & c) | ((~b) & d); k = 0x5A827999; }
+            else if (i < 40) { f = b ^ c ^ d; k = 0x6ED9EBA1; }
+            else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC; }
+            else { f = b ^ c ^ d; k = 0xCA62C1D6; }
+            var t = (((a << 5) | (a >>> 27)) + f + e + k + w[i]) | 0;
+            e = d; d = c; c = (b << 30) | (b >>> 2); b = a; a = t;
+        }
+        H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0;
+        H[3] = (H[3] + d) | 0; H[4] = (H[4] + e) | 0;
+    }
+    var out = [];
+    for (var i = 0; i < 5; i++) { out.push((H[i] >>> 24) & 255, (H[i] >>> 16) & 255, (H[i] >>> 8) & 255, H[i] & 255); }
+    return out;
+}
+function __phSha256(msg) {
+    var K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+             0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+             0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+             0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+             0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+             0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+             0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+             0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
+    var H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    var ml = msg.length;
+    var bytes = msg.slice();
+    bytes.push(0x80);
+    while (bytes.length % 64 !== 56) { bytes.push(0); }
+    var bitLen = ml * 8;
+    bytes.push(0, 0, 0, 0, (bitLen >>> 24) & 255, (bitLen >>> 16) & 255, (bitLen >>> 8) & 255, bitLen & 255);
+    var w = new Array(64);
+    for (var off = 0; off < bytes.length; off += 64) {
+        for (var i = 0; i < 16; i++) {
+            w[i] = (bytes[off + i * 4] << 24) | (bytes[off + i * 4 + 1] << 16) | (bytes[off + i * 4 + 2] << 8) | bytes[off + i * 4 + 3];
+        }
+        for (var i = 16; i < 64; i++) {
+            var s0 = ((w[i - 15] >>> 7) | (w[i - 15] << 25)) ^ ((w[i - 15] >>> 18) | (w[i - 15] << 14)) ^ (w[i - 15] >>> 3);
+            var s1 = ((w[i - 2] >>> 17) | (w[i - 2] << 15)) ^ ((w[i - 2] >>> 19) | (w[i - 2] << 13)) ^ (w[i - 2] >>> 10);
+            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+        }
+        var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+        for (var i = 0; i < 64; i++) {
+            var S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+            var ch = (e & f) ^ ((~e) & g);
+            var t1 = (h + S1 + ch + K[i] + w[i]) | 0;
+            var S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+            var mj = (a & b) ^ (a & c) ^ (b & c);
+            var t2 = (S0 + mj) | 0;
+            h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+        }
+        H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+        H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    var out = [];
+    for (var i = 0; i < 8; i++) { out.push((H[i] >>> 24) & 255, (H[i] >>> 16) & 255, (H[i] >>> 8) & 255, H[i] & 255); }
+    return out;
+}
+function __phCreateNodeCrypto() {
+    function createHash(algo) {
+        algo = String(algo).toLowerCase().replace(/-/g, '');
+        var chunks = [];
+        return {
+            update: function (data, enc) {
+                var bytes;
+                if (typeof data === 'string') {
+                    var e = String(enc || 'utf8').toLowerCase();
+                    if (e === 'base64') { bytes = __phB64Decode(data); }
+                    else if (e === 'hex') {
+                        bytes = [];
+                        var hex = String(data);
+                        for (var i = 0; i + 1 < hex.length; i += 2) { bytes.push(parseInt(hex.substr(i, 2), 16)); }
+                    } else { bytes = __phUtf8Encode(data); }
+                } else if (typeof data === 'object' && data !== null) {
+                    if (data instanceof ArrayBuffer) { bytes = new Uint8Array(data); }
+                    else if (ArrayBuffer.isView(data)) { bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength); }
+                    else if (Array.isArray(data)) { bytes = data; }
+                    else { bytes = __phUtf8Encode(String(data)); }
+                } else { bytes = __phUtf8Encode(String(data)); }
+                for (var i = 0; i < bytes.length; i++) { chunks.push(bytes[i]); }
+                return this;
+            },
+            digest: function (enc) {
+                var out;
+                if (algo === 'md5') { out = __phMd5M(chunks); }
+                else if (algo === 'sha1') { out = __phSha1(chunks); }
+                else if (algo === 'sha256' || algo === 'sha2') { out = __phSha256(chunks); }
+                else { throw new Error('node:crypto createHash 暂不支持算法: ' + algo); }
+                var e = String(enc || 'binary').toLowerCase();
+                if (e === 'hex') { return __phHexBytes(out); }
+                if (e === 'base64') { return __phB64Encode(out); }
+                return new Uint8Array(out);
+            }
+        };
+    }
+    return { createHash: createHash };
+}
+__phBuiltinModules['node:crypto'] = function (module, exports) {
+    module.exports = __phCreateNodeCrypto();
+};
+__phBuiltinModules['crypto'] = function (module, exports) {
+    module.exports = __phCreateNodeCrypto();
 };
 )JS";
 
@@ -1266,7 +1941,7 @@ std::string NativeResolvePath(const std::string &p, const std::string &bundle)
     return p;
 }
 
-// 执行 Load 命令：配置注入 → CommonJS 模块系统 → Bob shim → 用户脚本（顺序不可换）
+// 执行 Load 命令：配置注入 → CommonJS 模块系统 → 运行时 shim（Bob/Manggo 二选一）→ 用户脚本（顺序不可换）
 void HandleLoad(const RuntimeCommand &cmd)
 {
     // $file 目录：ArkTS 传入虚拟路径（/data/storage/...），native 与 ArkTS 同视图直接使用
@@ -1308,7 +1983,10 @@ void HandleLoad(const RuntimeCommand &cmd)
         err = EvalScript(pe->env, modulesCode.c_str(), modulesCode.size(), "modules");
     }
     if (err.empty()) {
-        err = EvalScript(pe->env, kBobShim, strlen(kBobShim), "bobshim");
+        // 运行时 shim 按插件来源二选一：manggo 插件注入 kManggoBootstrap（无 Bob 全局）
+        const bool isManggo = cmd.runtimeKind == "manggo";
+        const char *shim = isManggo ? kManggoBootstrap : kBobShim;
+        err = EvalScript(pe->env, shim, strlen(shim), isManggo ? "manggo-bootstrap" : "bobshim");
     }
     if (err.empty()) {
         err = EvalScript(pe->env, cmd.code.c_str(), cmd.code.size(), "plugin");
@@ -1455,6 +2133,46 @@ void HandleWsEvent(const RuntimeCommand &cmd)
         OH_JSVM_CallFunction(env, undef, fn, 3, args, &out);
     }
     OH_JSVM_CloseHandleScope(env, hs);
+}
+
+// 执行 Unload 命令：销毁插件 Env（配置变更/重装后的干净重载）。
+// 转换后的插件代码含顶层 const/class 等词法声明，向同一 Env 重复 eval 会报
+// "Identifier has already been declared"，故重载前必须整体重建 Env。
+// 该插件的 Env 上有挂起 HTTP/定时时拒绝销毁（避免迟到的 resolve 触碰已销毁 Env），保留旧 Env。
+void HandleUnload(const RuntimeCommand &cmd)
+{
+    auto it = g_envs.find(cmd.pluginId);
+    if (it == g_envs.end()) {
+        g_pendings[cmd.callId] = {NowMs(), false, true, false, true, "not loaded: " + cmd.pluginId};
+        return;
+    }
+    PluginEnv *pe = it->second;
+    for (const auto &kv : g_httpPendings) {
+        if (kv.second.env == pe->env) {
+            g_pendings[cmd.callId] = {NowMs(), false, true, false, false,
+                                      "plugin busy (http pending), keep old env: " + cmd.pluginId};
+            return;
+        }
+    }
+    for (const auto &kv : g_afterPendings) {
+        if (kv.second.env == pe->env) {
+            g_pendings[cmd.callId] = {NowMs(), false, true, false, false,
+                                      "plugin busy (timer pending), keep old env: " + cmd.pluginId};
+            return;
+        }
+    }
+    JSVM_HandleScope hs;
+    OH_JSVM_OpenHandleScope(pe->env, &hs);
+    OH_JSVM_CloseHandleScope(pe->env, hs);
+    // 注意：绝不能在此调 OH_JSVM_CloseEnvScope——EnvScope 在创建时 Open 后常驻，
+    // 期间 worker 上其他 Env 的调用/微任务会置换线程当前的已进入上下文，
+    // 此时 Exit 触发 V8 致命错误 "Cannot exit non-entered context"（SIGTRAP 闪退）。
+    // 直接 DestroyEnv 整体销毁。
+    OH_JSVM_DestroyEnv(pe->env);
+    g_envs.erase(it);
+    delete pe;
+    OH_LOG_INFO(LOG_APP, "unload %{public}s env destroyed", cmd.pluginId.c_str());
+    g_pendings[cmd.callId] = {NowMs(), false, true, false, true, "unloaded: " + cmd.pluginId};
 }
 
 // 消息泵一轮：微任务 → 宏任务 → 超时回收 → 结果回投主线程
@@ -1652,7 +2370,7 @@ void Runtime::PostResolveHttp(uint64_t httpId, bool ok, const std::string &respo
 void Runtime::PostLoad(uint64_t callId, const std::string &pluginId, const std::string &code,
                        const std::string &configJson, const std::string &modulesJson,
                        const std::string &pluginDir, const std::string &sandboxDir,
-                       const std::string &bundleName)
+                       const std::string &bundleName, const std::string &runtimeKind)
 {
     std::lock_guard<std::mutex> lk(g_queueMtx);
     RuntimeCommand cmd;
@@ -1665,6 +2383,18 @@ void Runtime::PostLoad(uint64_t callId, const std::string &pluginId, const std::
     cmd.pluginDir = pluginDir;
     cmd.sandboxDir = sandboxDir;
     cmd.bundleName = bundleName;
+    cmd.runtimeKind = runtimeKind.empty() ? std::string("bob") : runtimeKind;
+    g_queue.push_back(cmd);
+    g_queueCv.notify_one();
+}
+
+void Runtime::PostUnload(uint64_t callId, const std::string &pluginId)
+{
+    std::lock_guard<std::mutex> lk(g_queueMtx);
+    RuntimeCommand cmd;
+    cmd.type = RuntimeCommand::Type::Unload;
+    cmd.callId = callId;
+    cmd.pluginId = pluginId;
     g_queue.push_back(cmd);
     g_queueCv.notify_one();
 }
@@ -1727,6 +2457,12 @@ void Runtime::WorkerLoop()
                 HandleDeliverStream(cmd);
             } else if (cmd.type == RuntimeCommand::Type::WsEvent) {
                 HandleWsEvent(cmd);
+            } else if (cmd.type == RuntimeCommand::Type::Unload) {
+                HandleUnload(cmd);
+            } else if (cmd.type == RuntimeCommand::Type::Start) {
+                // 兜底：若 Start 前被其他命令插队（线程启动时未取到队首），在此完成其 Promise，
+                // 否则 initRuntime 永不结算、所有插件加载挂死
+                PostResult(cmd.callId, true, "started");
             }
         }
         if (!batch.empty() || !g_pendings.empty()) {

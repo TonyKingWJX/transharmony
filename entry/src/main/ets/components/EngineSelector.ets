@@ -121,6 +121,10 @@ export struct EngineSelector {
       if (adapter === undefined || !s.enabled) {
         continue;
       }
+      // manggo 多服务插件：仅用户在插件配置页勾选的服务显示（selected=false 不出 chip）
+      if (s.selected === false) {
+        continue;
+      }
       if (adapter.needsConfig && !this.isConfiguredSvc(s.id)) {
         continue;
       }

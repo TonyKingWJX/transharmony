@@ -1,6 +1,7 @@
 import { webSocket } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
 import pluginHost from 'libpluginhost.so';
+import { devLogStore } from '../DevLogStore';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /**
@@ -49,9 +50,11 @@ export class WsBridge {
         ws.connect(url, { header: header })
           .then((): void => {
             hilog.info(0x0001, 'WsBridge', 'connect ok id=%{public}d %{public}s', id, url);
+            devLogStore.append('info', 'ws', `连接成功：${url}`);
           })
           .catch((e: BusinessError): void => {
             hilog.error(0x0001, 'WsBridge', 'connect fail id=%{public}d %{public}s', id, e.message);
+            devLogStore.append('error', 'ws', `连接失败：${url}：${e.message}`);
             const data: Record<string, string> = { 'message': e.message };
             pluginHost.deliverWsEvent(pid, id, 'error', JSON.stringify(data));
           });
@@ -59,6 +62,7 @@ export class WsBridge {
         const text = typeof req['text'] === 'string' ? req['text'] as string : '';
         ws.send(text).catch((e: BusinessError): void => {
           hilog.error(0x0001, 'WsBridge', 'send fail id=%{public}d %{public}s', id, e.message);
+          devLogStore.append('error', 'ws', `发送失败：${e.message}`);
         });
       } else if (op === 'sendb') {
         const b64 = typeof req['b64'] === 'string' ? req['b64'] as string : '';
@@ -66,16 +70,19 @@ export class WsBridge {
         const bytes = helper.decodeSync(b64);
         ws.send(bytes.buffer as ArrayBuffer).catch((e: BusinessError): void => {
           hilog.error(0x0001, 'WsBridge', 'sendb fail id=%{public}d %{public}s', id, e.message);
+          devLogStore.append('error', 'ws', `发送失败（二进制）：${e.message}`);
         });
       } else if (op === 'close') {
         const code = typeof req['code'] === 'number' ? req['code'] as number : 1000;
         ws.close({ code: code }).catch((e: BusinessError): void => {
           hilog.error(0x0001, 'WsBridge', 'close fail id=%{public}d %{public}s', id, e.message);
+          devLogStore.append('warn', 'ws', `关闭失败：${e.message}`);
         });
       }
     } catch (e) {
       const msg = (e instanceof Error) ? e.message : String(e);
       hilog.error(0x0001, 'WsBridge', 'op failed: %{public}s', msg);
+      devLogStore.append('error', 'ws', `操作失败：${msg}`);
     }
   }
 

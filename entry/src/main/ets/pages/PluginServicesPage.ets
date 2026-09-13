@@ -2,6 +2,12 @@ import { common } from '@kit.AbilityKit';
 import { fileIo, picker, fileUri } from '@kit.CoreFileKit';
 import { PluginInstaller, InstalledPlugin } from '../services/plugin/PluginInstaller';
 import { PLUGIN_DEF_PREFIX, pluginServiceId, bobPluginEngine } from '../services/plugin/BobPluginEngine';
+import {
+  manggoServiceId,
+  manggoDefId,
+  parseManggoServices,
+  isSupportedManggoService
+} from '../services/plugin/ManggoTypes';
 import { settingsStore, ServiceItem } from '../services/SettingsStore';
 import { TranslateUseCase } from '../services/TranslateUseCase';
 import { PILL_VERSION_KEY } from '../components/EngineSelector';
@@ -49,6 +55,24 @@ export struct PluginServicesPage {
   /** 已安装插件清单（按类别分组展示） */
   @State plugins: InstalledPlugin[] = [];
   @State importing: boolean = false;
+  /** 加载失败/无图标的插件：回退首字头像 */
+  private brokenIcons: Set<string> = new Set();
+  @State iconTick: number = 0;
+
+  /** 插件图标（Bob info.json icon / manggo 清单 icon），无或已失败返回空串 */
+  private pluginIconUrl(rec: InstalledPlugin): string {
+    if (this.brokenIcons.has(rec.pluginId)) {
+      return '';
+    }
+    return PluginInstaller.pluginIconPath(rec);
+  }
+
+  private markIconBroken(key: string): void {
+    if (!this.brokenIcons.has(key)) {
+      this.brokenIcons.add(key);
+      this.iconTick++;
+    }
+  }
 
   aboutToAppear(): void {
     this.refresh();
@@ -75,12 +99,33 @@ export struct PluginServicesPage {
   }
 
   private isEnabled(rec: InstalledPlugin): boolean {
+    // Manggo 多服务插件：任一服务启用即视为启用；Bob：单服务实例
+    if (rec.source === 'manggo') {
+      const prefix = `plugin-${rec.pluginId}#`;
+      const services = settingsStore.getServices();
+      for (const s of services) {
+        if ((s.id.startsWith(prefix) || s.id === pluginServiceId(rec.pluginId)) && s.enabled) {
+          return true;
+        }
+      }
+      return false;
+    }
     const svc = settingsStore.getService(pluginServiceId(rec.pluginId));
     return svc !== undefined && svc.enabled;
   }
 
-  /** 显示名：用户在配置页改过名则优先（ServiceItem.name），否则用 info.json 的 name */
+  /** 显示名：用户在配置页改过名则优先（ServiceItem.name），否则用清单的 name */
   private displayName(rec: InstalledPlugin): string {
+    if (rec.source === 'manggo') {
+      const prefix = `plugin-${rec.pluginId}#`;
+      const services = settingsStore.getServices();
+      for (const s of services) {
+        if (s.id.startsWith(prefix) && s.name.length > 0) {
+          return s.name;
+        }
+      }
+      return rec.name;
+    }
     const svc = settingsStore.getService(pluginServiceId(rec.pluginId));
     if (svc !== undefined && svc.name.length > 0) {
       return svc.name;
@@ -88,14 +133,23 @@ export struct PluginServicesPage {
     return rec.name;
   }
 
-  /** 开关：翻译插件启用后进引擎行/聚合；TTS/OCR 启用状态供后续执行接入使用 */
+  /** 开关：整体启停（Manggo 多服务插件同时作用于其全部服务实例） */
   private async togglePlugin(rec: InstalledPlugin, on: boolean): Promise<void> {
-    await settingsStore.setServiceEnabled(pluginServiceId(rec.pluginId), on);
+    if (rec.source === 'manggo') {
+      const prefix = `plugin-${rec.pluginId}#`;
+      for (const s of settingsStore.getServices()) {
+        if (s.id.startsWith(prefix)) {
+          await settingsStore.setServiceEnabled(s.id, on);
+        }
+      }
+    } else {
+      await settingsStore.setServiceEnabled(pluginServiceId(rec.pluginId), on);
+    }
     TranslateUseCase.refreshServices();
     this.bumpPill();
   }
 
-  /** 导入 .bobplugin：系统文件管理器选择 → 校验安装（三类均可）→ 建服务实例（默认启用） */
+  /** 导入 .bobplugin / .mplugin：系统文件管理器选择 → 校验安装 → 建服务实例（默认启用） */
   private async importPlugin(): Promise<void> {
     if (this.importing) {
       return;
@@ -104,7 +158,8 @@ export struct PluginServicesPage {
     try {
       const selOpts = new picker.DocumentSelectOptions();
       selOpts.maxSelectNumber = 1;
-      selOpts.fileSuffixFilters = ['Bob插件(.bobplugin)|.bobplugin'];
+      selOpts.fileSuffixFilters =
+        ['Bob插件(.bobplugin)|.bobplugin', 'Manggo插件(.mplugin)|.mplugin'];
       const dvp = new picker.DocumentViewPicker(this.ctx());
       const uris = await dvp.select(selOpts);
       if (uris === undefined || uris.length === 0) {
@@ -128,7 +183,11 @@ export struct PluginServicesPage {
       TranslateUseCase.refreshServices();
       this.bumpPill();
       await this.refresh();
-      if (rec.category === 'translate') {
+      if (rec.source === 'manggo'
+        && parseManggoServices(rec.infoJson).filter((s): boolean =>
+          isSupportedManggoService(s) && s.kind === 'translation').length > 1) {
+        this.toast(`已安装「${rec.name}」，请在插件配置页勾选要在引擎行显示的服务`);
+      } else if (rec.category === 'translate') {
         this.toast(`已安装「${rec.name}」，可在引擎行选用`);
       } else {
         this.toast(`已安装「${rec.name}」，可在「我的 → 偏好设置」中选用`);
@@ -141,8 +200,51 @@ export struct PluginServicesPage {
     }
   }
 
-  /** 首次导入后建服务实例（defId = 'plugin:<identifier>'，默认启用） */
+  /** 首次导入后建服务实例（默认启用）：
+   *  Bob：单实例（id='plugin-<identifier>'，defId='plugin:<identifier>'）；
+   *  Manggo：每个受支持服务一个实例（id='plugin-<pid>#<sid>'，defId='plugin:<pid>#<sid>'）。
+   *  翻译服务的引擎行勾选（selected）：仅一个翻译服务默认勾选；多个时不勾选任何，
+   *  由用户在插件配置页「引擎行显示」勾选（避免导入即铺满全部 chip）。 */
   private async ensureServiceItem(rec: InstalledPlugin): Promise<void> {
+    if (rec.source === 'manggo') {
+      const list = settingsStore.getServices();
+      const services = parseManggoServices(rec.infoJson).filter((s): boolean => isSupportedManggoService(s));
+      const transCount = services.filter((s): boolean => s.kind === 'translation').length;
+      let changed = false;
+      for (const svc of services) {
+        const id = manggoServiceId(rec.pluginId, svc.id);
+        const hit = list.find((s: ServiceItem): boolean => s.id === id);
+        // 显示名：服务 displayName，多服务且未提供时补服务 id 后缀防重名
+        const svcName = svc.displayName.length > 0 ? svc.displayName
+          : (services.length > 1 ? `${rec.name} · ${svc.id}` : rec.name);
+        if (hit === undefined) {
+          const item: ServiceItem = {
+            id: id,
+            defId: manggoDefId(rec.pluginId, svc.id),
+            name: svcName,
+            enabled: true,
+            config: {},
+            selected: svc.kind === 'translation' ? transCount <= 1 : undefined
+          };
+          list.push(item);
+          changed = true;
+        } else {
+          // 重装（升级）场景：同步显示名与勾选默认值，保留开关/配置
+          if (hit.name !== svcName) {
+            hit.name = svcName;
+            changed = true;
+          }
+          if (svc.kind === 'translation' && hit.selected === undefined) {
+            hit.selected = transCount <= 1;
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        await settingsStore.setServices(list);
+      }
+      return;
+    }
     const id = pluginServiceId(rec.pluginId);
     if (settingsStore.getService(id) !== undefined) {
       // 重装同名插件：同步显示名，保留开关状态
@@ -164,6 +266,16 @@ export struct PluginServicesPage {
     };
     list.push(item);
     await settingsStore.setServices(list);
+  }
+
+  /** Manggo 多服务插件：配置页目标服务（优先翻译服务，其次首个受支持服务；空串由配置页兜底） */
+  private firstServiceId(rec: InstalledPlugin): string {
+    const services = parseManggoServices(rec.infoJson).filter((s): boolean => isSupportedManggoService(s));
+    if (services.length === 0) {
+      return '';
+    }
+    const translation = services.find((s): boolean => s.kind === 'translation');
+    return translation !== undefined ? translation.id : services[0].id;
   }
 
   /** 删除：二次确认 → 移除服务实例 + 卸载插件 + 重建引擎 */
@@ -189,8 +301,14 @@ export struct PluginServicesPage {
   }
 
   private async doDelete(rec: InstalledPlugin): Promise<void> {
-    await settingsStore.removeService(pluginServiceId(rec.pluginId));
-    await PluginInstaller.uninstall(this.ctx(), rec.pluginId, PluginInstaller.secureOptionIds(rec));
+    // 移除该插件全部服务实例（Bob 单实例；Manggo 多实例带 '#serviceId' 后缀）
+    const prefix = `plugin-${rec.pluginId}`;
+    for (const s of settingsStore.getServices()) {
+      if (s.id === prefix || s.id.startsWith(prefix + '#')) {
+        await settingsStore.removeService(s.id);
+      }
+    }
+    await PluginInstaller.uninstall(this.ctx(), rec.pluginId, PluginInstaller.secureAliases(rec));
     bobPluginEngine.invalidate(rec.pluginId);
     TranslateUseCase.refreshServices();
     this.bumpPill();
@@ -215,15 +333,29 @@ export struct PluginServicesPage {
           Row({ space: 12 }) {
             // 点击行进插件配置页（选项表单 + 测试连通）
             Row({ space: 12 }) {
-              Text(this.displayName(rec).length > 0 ? this.displayName(rec).substring(0, 1) : '插')
-                .fontSize(16)
-                .fontWeight(FontWeight.Medium)
-                .fontColor(Color.White)
-                .width(40)
-                .height(40)
-                .textAlign(TextAlign.Center)
-                .borderRadius(12)
-                .backgroundColor($r('app.color.brand'))
+              Stack() {
+                Text(this.displayName(rec).length > 0 ? this.displayName(rec).substring(0, 1) : '插')
+                  .fontSize(16)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(Color.White)
+                  .width(40)
+                  .height(40)
+                  .textAlign(TextAlign.Center)
+                  .borderRadius(12)
+                  .backgroundColor($r('app.color.brand'))
+                if (this.pluginIconUrl(rec) !== '') {
+                  Image('file://' + this.pluginIconUrl(rec))
+                    .width(40)
+                    .height(40)
+                    .borderRadius(12)
+                    .objectFit(ImageFit.Cover)
+                    .onError(() => {
+                      this.markIconBroken(rec.pluginId);
+                    })
+                }
+              }
+              .width(40)
+              .height(40)
               Column({ space: 4 }) {
                 Row({ space: 6 }) {
                   Text(this.displayName(rec))
@@ -232,19 +364,22 @@ export struct PluginServicesPage {
                     .fontColor($r('app.color.font_primary'))
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
+                .alignItems(VerticalAlign.Center)
+
+                // 第二行：来源标识 Bob（蓝）/ Manggo（橘）+ 版本号（长名称不与版本挤同一行）
+                Row({ space: 6 }) {
+                  Text(sourceLabel(rec))
+                    .fontSize(10)
+                    .fontColor(rec.source === 'manggo' ? '#E8833A' : $r('app.color.brand'))
+                    .padding({ left: 6, right: 6, top: 1, bottom: 1 })
+                    .borderRadius(6)
+                    .backgroundColor(rec.source === 'manggo' ? '#FBF0E5' : $r('app.color.emphasize_bg_light'))
                   Text('v' + rec.version)
                     .fontSize(10)
                     .fontColor($r('app.color.font_fourth'))
                 }
                 .alignItems(VerticalAlign.Center)
-
-                // 来源标识：Bob（蓝）/ Manggo（橘）
-                Text(sourceLabel(rec))
-                  .fontSize(10)
-                  .fontColor(rec.source === 'manggo' ? '#E8833A' : $r('app.color.brand'))
-                  .padding({ left: 6, right: 6, top: 1, bottom: 1 })
-                  .borderRadius(6)
-                  .backgroundColor(rec.source === 'manggo' ? '#FBF0E5' : $r('app.color.emphasize_bg_light'))
               }
               .alignItems(HorizontalAlign.Start)
             }
@@ -252,6 +387,9 @@ export struct PluginServicesPage {
             .alignItems(VerticalAlign.Center)
             .onClick(() => {
               const param: Record<string, string> = { 'pluginId': rec.pluginId };
+              if (rec.source === 'manggo') {
+                param['serviceId'] = this.firstServiceId(rec);
+              }
               this.pathStack.pushPath({ name: 'PluginConfigPage', param: param });
             })
 
@@ -345,7 +483,7 @@ export struct PluginServicesPage {
                     .fontSize(15)
                     .fontWeight(FontWeight.Medium)
                     .fontColor($r('app.color.font_primary'))
-                  Text('从文件管理器选择 .bobplugin 插件包')
+                  Text('从文件管理器选择 .bobplugin / .mplugin 插件包')
                     .fontSize(12)
                     .lineHeight(17)
                     .fontColor($r('app.color.font_tertiary'))
@@ -375,7 +513,7 @@ export struct PluginServicesPage {
                 this.importPlugin();
               })
 
-              Text('支持翻译 / 语音TTS / 文字识别OCR 插件 · 自动按类型归入下方板块')
+              Text('支持 Bob / Manggo 插件 · 翻译 / 语音TTS / 文字识别OCR · 自动按类型归入下方板块')
                 .fontSize(11)
                 .fontColor($r('app.color.font_fourth'))
                 .width('100%')
@@ -396,7 +534,7 @@ export struct PluginServicesPage {
                 Text('还没有安装插件')
                   .fontSize(14)
                   .fontColor($r('app.color.font_tertiary'))
-                Text('导入 .bobplugin 后自动按类型归入对应板块')
+                Text('导入 .bobplugin / .mplugin 后自动按类型归入对应板块')
                   .fontSize(11)
                   .fontColor($r('app.color.font_fourth'))
               }

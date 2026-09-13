@@ -5,6 +5,7 @@ import { buffer, util } from '@kit.ArkTS';
 import { settingsStore, ServiceItem } from './SettingsStore';
 import { historyStore, NewHistoryItem } from './HistoryStore';
 import { TranslateUseCase } from './TranslateUseCase';
+import { devLogStore } from './DevLogStore';
 import { TransImageStore, ImageFileData } from '../utils/TransImageStore';
 import { PILL_VERSION_KEY } from '../components/EngineSelector';
 
@@ -181,7 +182,17 @@ export class BackupService {
    * includeImages=true 时携带图片翻译原图。
    * 返回备份文件名；用户取消（picker 返回空）返回空串。
    */
+  /** 立即备份（失败采集日志） */
   static async backup(ctx: common.UIAbilityContext, password: string, includeImages: boolean): Promise<string> {
+    try {
+      return await BackupService.doBackup(ctx, password, includeImages);
+    } catch (e) {
+      devLogStore.append('error', 'backup', '备份失败：' + ((e instanceof Error) ? e.message : String(e)));
+      throw e instanceof Error ? e : new Error(String(e));
+    }
+  }
+
+  private static async doBackup(ctx: common.UIAbilityContext, password: string, includeImages: boolean): Promise<string> {
     const history = await historyStore.getAll();
     const rows: BackupHistoryRow[] = [];
     for (const h of history) {
@@ -265,8 +276,17 @@ export class BackupService {
     return new Uint8Array(buf);
   }
 
-  /** 解密并校验文件（密码错误/损坏抛错），返回 payload 给 UI 二次确认 */
+  /** 解密并校验文件（密码错误/损坏抛错），返回 payload 给 UI 二次确认（失败采集日志） */
   static async parse(bytes: Uint8Array, password: string): Promise<BackupPayload> {
+    try {
+      return await BackupService.doParse(bytes, password);
+    } catch (e) {
+      devLogStore.append('error', 'backup', '备份文件解析失败：' + ((e instanceof Error) ? e.message : String(e)));
+      throw e instanceof Error ? e : new Error(String(e));
+    }
+  }
+
+  private static async doParse(bytes: Uint8Array, password: string): Promise<BackupPayload> {
     const payload = await BackupService.decryptPayload(bytes, password);
     if (payload.app !== 'transharmony') {
       throw new Error('不是鸿译的备份文件');
@@ -290,7 +310,17 @@ export class BackupService {
    * 应用恢复：历史（合并去重 / 覆盖）、服务商配置与偏好（整体替换，调用方需已二次确认）、
    * 图片回写沙箱（覆盖模式先清空图片目录）。完成后刷新引擎注册表并广播版本号。
    */
+  /** 应用恢复入口（失败采集日志） */
   static async apply(payload: BackupPayload, historyReplace: boolean, ctx: common.Context): Promise<RestoreSummary> {
+    try {
+      return await BackupService.doApply(payload, historyReplace, ctx);
+    } catch (e) {
+      devLogStore.append('error', 'backup', '恢复失败：' + ((e instanceof Error) ? e.message : String(e)));
+      throw e instanceof Error ? e : new Error(String(e));
+    }
+  }
+
+  private static async doApply(payload: BackupPayload, historyReplace: boolean, ctx: common.Context): Promise<RestoreSummary> {
     let rows: NewHistoryItem[] = [];
     for (const r of payload.history) {
       rows.push({

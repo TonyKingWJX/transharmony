@@ -1,6 +1,7 @@
 import pluginHost from 'libpluginhost.so';
 import { HttpBridge } from '../services/plugin/HttpBridge';
 import { PluginInstaller, InstalledPlugin } from '../services/plugin/PluginInstaller';
+import { PLUGIN_LOG_TEXT_KEY } from '../services/DevLogStore';
 import { common } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 
@@ -25,24 +26,13 @@ export struct PluginLabPage {
   @State bobRunning: boolean = false;
   @State installLog: string = '尚未运行';
   @State installRunning: boolean = false;
-  /** 插件 $log 实时输出（registerLogHandler 回投，全插件共享，最多保留 40 行） */
-  @State pluginLog: string = '';
+  /** 插件 $log 实时输出：读全局回投写入的 AppStorage 文本（EntryAbility 注册，最多保留 40 行） */
+  @StorageProp(PLUGIN_LOG_TEXT_KEY) pluginLog: string = '';
 
   aboutToAppear(): void {
     // HTTP 桥注册：让插件沙盒的 nativeHttp 走真实网络
     HttpBridge.register();
-    // 插件 $log 回投：native hilog 之外的页面内可见日志
-    pluginHost.registerLogHandler((logJson: string): void => {
-      try {
-        const entry = JSON.parse(logJson) as Record<string, string>;
-        const line = '[' + (entry['level'] ?? 'info') + '] ' + (entry['message'] ?? '');
-        const lines = this.pluginLog === '' ? [] : this.pluginLog.split('\n');
-        lines.push(line);
-        this.pluginLog = lines.slice(-40).join('\n');
-      } catch (e) {
-        // 忽略解析失败
-      }
-    });
+    // 插件 $log 全局回投已在 EntryAbility 注册（本页只读展示，不在此重复注册覆盖采集链路）
   }
 
   private toast(msg: string): void {

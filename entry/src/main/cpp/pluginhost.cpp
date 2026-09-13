@@ -161,11 +161,12 @@ napi_value InitRuntime(napi_env env, napi_callback_info info)
     return promise;
 }
 
-// loadPlugin(pluginId, code, configJson?, modulesJson?, pluginDir?, sandboxDir?, bundleName?): Promise<string>
+// loadPlugin(pluginId, code, configJson?, modulesJson?, pluginDir?, sandboxDir?, bundleName?, kind?): Promise<string>
+// kind: 'bob'（默认，Bob shim）| 'manggo'（manggo 启动脚本）
 napi_value LoadPlugin(napi_env env, napi_callback_info info)
 {
-    size_t argc = 7;
-    napi_value argv[7] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+    size_t argc = 8;
+    napi_value argv[8] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     if (argc < 2) {
         napi_throw_type_error(env, nullptr, "loadPlugin requires (pluginId, code, ...)");
@@ -186,11 +187,34 @@ napi_value LoadPlugin(napi_env env, napi_callback_info info)
     std::string pluginDir = argc >= 5 ? readStr(argv[4]) : "";
     std::string sandboxDir = argc >= 6 ? readStr(argv[5]) : "";
     std::string bundleName = argc >= 7 ? readStr(argv[6]) : "";
+    std::string kind = argc >= 8 ? readStr(argv[7]) : "";
 
     uint64_t callId = 0;
     napi_value promise = BeginRuntimeCall(env, callId);
     pluginhost::Runtime::Instance().PostLoad(callId, pluginId, code, configJson, modulesJson,
-                                             pluginDir, sandboxDir, bundleName);
+                                             pluginDir, sandboxDir, bundleName, kind);
+    return promise;
+}
+
+// unloadPlugin(pluginId): Promise<string> —— 销毁插件 Env（配置变更/重装后的干净重载）
+napi_value UnloadPlugin(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value argv[1] = {nullptr};
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    if (argc < 1) {
+        napi_throw_type_error(env, nullptr, "unloadPlugin requires (pluginId)");
+        return nullptr;
+    }
+    size_t n = 0;
+    napi_get_value_string_utf8(env, argv[0], nullptr, 0, &n);
+    std::vector<char> buf(n + 1, '\0');
+    napi_get_value_string_utf8(env, argv[0], buf.data(), n + 1, &n);
+    std::string pluginId(buf.data(), n);
+
+    uint64_t callId = 0;
+    napi_value promise = BeginRuntimeCall(env, callId);
+    pluginhost::Runtime::Instance().PostUnload(callId, pluginId);
     return promise;
 }
 
@@ -800,6 +824,7 @@ static napi_value Init(napi_env env, napi_value exports)
         {"esmProbe", nullptr, EsmProbe, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"initRuntime", nullptr, InitRuntime, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"loadPlugin", nullptr, LoadPlugin, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"unloadPlugin", nullptr, UnloadPlugin, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"callPluginFn", nullptr, CallPluginFn, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"registerHttpHandler", nullptr, RegisterHttpHandler, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"resolveHttp", nullptr, ResolveHttp, nullptr, nullptr, nullptr, napi_default, nullptr},

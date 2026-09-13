@@ -1,132 +1,425 @@
-# 鸿译 TransHarmony
+# 鸿译 TransHarmony — 鸿蒙原生翻译应用
 
-> 鸿蒙（HarmonyOS NEXT）原生 AI 翻译应用：免费通道开箱即翻、12 个翻译服务商可切换、多引擎聚合对比、BYOK 接入大模型、支持 Bob 插件（后续将支持 Manggo 插件）。
+> 鸿蒙（HarmonyOS NEXT）上的 AI 翻译应用：基础翻译功能永久免费、多引擎可切换、支持接入 AI 大模型，把「翻译质量」和「好用程度」作为第一目标。
+>
+> 项目代号「鸿译」为占位名，正式名称待定（见「待决策清单」）。
 
-当前版本 **v1.0.1**，真机验证通过，持续迭代中。版本历史见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+**当前状态：v1.0.2，功能开发完成（含 Bob + manggo 插件系统），真机可跑，待上架准备（商店素材、AGC 配置）。** 详见「11. 工程现状」与「12. 版本历史」。
 
-## ✨ 功能特性
+---
 
-- **开箱即翻**：内置微软 Bing、有道两个免费通道，无需注册即可翻译
-- **多引擎聚合**：同时并发多个引擎，逐个返回、耗时展示、一键采用
-- **12 个服务商适配**：免费通道 2 个 + 传统 API 7 家（腾讯云 / 阿里云 / 百度 / Azure / 有道智云 / 彩云 / 小牛）+ AI 引擎
-- **AI 翻译（BYOK）**：DeepSeek / GLM / 通义 / Kimi / Anthropic 预置，支持任意 OpenAI 兼容接口，自动获取模型列表，可自定义翻译 Prompt；译文润色、语法解释、多风格输出
-- **语音输入与朗读**：Core Speech Kit ASR（支持暂停 / 继续）+ TTS 朗读
-- **拍照翻译**：拍照 / 相册取图 → 端侧 OCR（Core Vision Kit）→ 自动翻译，照片即用即焚
-- **Bob 插件系统**：兼容 Bob 插件（.bobplugin，JSVM 沙盒运行时），插件即引擎，支持翻译 / OCR / TTS 类插件；**后续将支持 Manggo 插件**（.mplugin，ESM 规范）
-- **历史与收藏**：本地存储、搜索、语言对筛选、回收站（30 天软删除）、详情页、批量操作
-- **备份恢复**：历史 + 服务商配置 + 偏好整包 AES-256-GCM 加密（.htrans），免存储权限
-- **隐私与合规**：凭证存系统关键资产（Asset Store Kit）、敏感词 DFA 检测、AI 内容合规提示、权限最小化（仅 INTERNET / GET_NETWORK_INFO / MICROPHONE）
-- **体验**：深色模式、平板 / 宽屏双列工作台、对齐鸿蒙官方设计规范（悬浮胶囊页签、语义色 Token）
+## 1. 项目背景与定位
 
-## 界面预览
+**为什么做：**
+- 鸿蒙 NEXT 已进入纯血鸿蒙阶段，原生应用生态仍在补齐，翻译类原生应用数量少、体验参差。
+- 手机自带翻译偏「够用即可」，在译文质量、多引擎对比、AI 润色、细分场景（学术、跨境电商、开发者文档）上明显欠缺。
+- 大模型翻译质量已显著超过传统机翻（尤其中译英的地道程度），但鸿蒙上缺少把大模型当翻译引擎用的顺手工具。
 
-| 聚合翻译 | 语言选择 | 历史记录 |
-|---|---|---|
-| ![聚合翻译](docs/screenshots/translate.jpg) | ![语言选择](docs/screenshots/translate-language-picker.jpg) | ![历史记录](docs/screenshots/history.jpg) |
+**产品定位一句话：**
+给鸿蒙用户的「翻译瑞士军刀」——普通场景快、准、免费；高阶场景可切换 AI 大模型，做润色、解释、多版本对比。
 
-| 我的 | 添加服务商 · 传统引擎 | 添加服务商 · AI 引擎 | 插件服务 |
+**差异化策略：**
+| 维度 | 系统自带翻译 | 传统翻译 App | 鸿译 |
 |---|---|---|---|
-| ![我的](docs/screenshots/settings.jpg) | ![添加服务商·传统引擎](docs/screenshots/providers-traditional.jpg) | ![添加服务商·AI 引擎](docs/screenshots/providers-ai.jpg) | ![插件服务](docs/screenshots/plugins.jpg) |
+| 基础文本翻译 | ✅ 免费 | 广告/会员墙 | ✅ 免费无广告 |
+| 多引擎切换对比 | ❌ | 少数有 | ✅ 核心功能 |
+| AI 大模型翻译 | 有限 | 个别有 | ✅ 核心功能，支持 BYOK（用户自带 API Key） |
+| 译文润色/语法解释 | ❌ | ❌ | ✅ AI 模式专属 |
+| 隐私 | 系统级 | 不透明 | 本地优先，BYOK 时数据不过自建服务器 |
 
-## 引擎支持
+---
 
-| 引擎 | 类型 | 说明 |
+## 2. 目标（SMART）
+
+**产品目标：**
+- 3.5 个月内（2026-12-31 前）完成 MVP 并上架华为应用市场。
+- 翻译首字节响应 < 1.5s（传统引擎）/ < 5s（AI 流式输出）。
+- 上架 3 个月内应用市场评分 ≥ 4.5，收集 100+ 条真实反馈并迭代 2 个版本。
+
+**个人目标（假设为独立开发）：**
+- 跑通「鸿蒙原生应用从 0 到上架」全流程，形成可复用的工程模板。
+- 验证工具类应用在鸿蒙生态的商业可行性（会员订阅 + BYOK）。
+
+**北极星指标：** 周翻译会话数（用户带着需求回来的频率，而非下载量）。
+
+---
+
+## 3. 需求分解（按优先级分期）
+
+### P0 — MVP 必须有（上架门槛）
+| # | 功能 | 说明 |
 |---|---|---|
-| 微软 Bing 免费通道 | 免费 | **默认引擎**，无需配置 |
-| 有道免费通道 | 免费 | 无需配置 |
-| 腾讯云 TMT、阿里云 alimt、百度翻译、Azure Translator、有道智云、彩云、小牛翻译 | 传统 BYOK | 用户自备凭证 |
-| DeepSeek / GLM / 通义 / Kimi 及任意 OpenAI 兼容接口 | AI BYOK | 预置 + 自定义 |
-| Anthropic 协议 | AI BYOK | Claude 系列 |
-| 阿里网页通道 | 免费 | 暂缓（风控不稳定，代码保留） |
+| 1 | 文本翻译 | 输入即译、自动检测源语言、70+ 语言对 |
+| 2 | 多引擎切换 | 至少接入 2 家传统引擎（推荐百度 + 腾讯云），可一键切换对比 |
+| 3 | 译文操作 | 一键复制、重新翻译、切换引擎后保留原文 |
+| 4 | 历史记录 | 本地存储，按语言对/时间筛选，可清空、可删除单条 |
+| 5 | 收藏/生词本 | 收藏常用句子，分类管理 |
+| 6 | 设置页 | 默认语言对、默认引擎、深色模式跟随系统 |
 
-> ⚠️ 各引擎价格与免费额度随时变动，以官方最新政策为准；签名方式、语言覆盖、合规注意等调研细节见 [docs/translation-providers.md](docs/translation-providers.md)。
+### P1 — 竞争力功能（上架后第一个月）
+| # | 功能 | 说明 |
+|---|---|---|
+| 7 | AI 翻译模式 | 接入大模型（DeepSeek/GLM/通义等），流式输出 |
+| 8 | BYOK | 用户填自己的 API Key，不限量免费使用（极客人群差异化卖点） |
+| 9 | 译文润色与解释 | 「更地道」「正式/口语化」「解释语法点」三种指令 |
+| 10 | 双引擎对照 | 同屏对比传统引擎 vs AI 译文 |
+| 11 | 语音翻译 | 语音识别 + 朗读译文（TTS） |
+| 12 | 拍照翻译 | OCR 识别后整段翻译（依赖系统/HMS OCR 能力） |
 
-## 快速开始
+### P2 — 想象空间（验证 PMF 后）
+| # | 功能 | 说明 |
+|---|---|---|
+| 13 | 对话翻译 | 双向分屏，跨语言交流场景 |
+| 14 | 元服务卡片 | 桌面卡片快速翻译，拉活跃 |
+| 15 | 长文分段翻译 | 网页/文档级翻译，保持段落结构 |
+| 16 | 离线翻译包 | 端侧小模型，成本高，视用户呼声决定 |
+| 17 | 鸿蒙特性 | 折叠屏/平板适配、多端协同流转 |
 
-### 环境要求
+**明确不做（防止范围蔓延）：**
+- 全局取词、屏幕翻译——依赖系统级能力，鸿蒙沙箱内基本不可行，不做。
+- 社区/UGC、账号体系——初期完全不需要，本地优先。
 
-- [DevEco Studio](https://developer.huawei.com/consumer/cn/deveco-studio/) 6.x（内置 HarmonyOS SDK）
-- 编译目标：HarmonyOS 6.1.1（API 24），兼容 6.1.1 及以上设备
+---
 
-### 构建运行
+## 4. 商业模式与免费/付费边界
 
-1. `git clone` 本仓库后用 DevEco Studio 打开根目录，等待 Sync 自动安装 oh_modules 依赖
-2. 配置签名（见下节）
-3. 连接真机或启动模拟器，Run 即可
+**原则：基础功能永久免费、无广告；靠 AI 增值付费，成本模型必须自洽。**
 
-### 签名配置
+| 层级 | 内容 | 定价 |
+|---|---|---|
+| 免费层 | 传统引擎文本翻译、历史、收藏、基础语音朗读 | 免费，靠服务商免费额度覆盖（见调研文档） |
+| BYOK 层 | 用户自带大模型 API Key，AI 翻译不限量 | 免费（0 服务器成本，双赢） |
+| 会员层 | 内置 AI 翻译额度（免 Key 开箱即用）、OCR/语音高额度、领域翻译、润色不限量 | 订阅制，价格上架前定 |
 
-仓库中的 `build-profile.json5` 不含签名信息。真机运行需要签名，二选一：
+**关键架构约束：** BYOK 模式下 App 直连第三方 API（无服务器、零成本）；内置 AI 模式需要自建代理服务器保护 Key（抓包可提取端侧硬编码 Key），意味着成本与备案。**初期策略：只做 BYOK，零服务器起步，验证需求后再上内置额度。**
 
-- **推荐**：DevEco Studio → File → Project Structure → Signing Configs → 勾选 *Automatically generate signature*，登录华为开发者账号后自动生成调试证书（DevEco 会把签名信息写入本地 `build-profile.json5`，该改动请勿提交）
-- **手动**：自备 .p12 / .cer / .p7b 证书，在 `signingConfigs` 中配置 `storeFile` / `storePassword` / `keyAlias` / `profile` / `certpath`
+---
 
-> ⚠️ 请勿将证书文件或密钥密码提交到公开仓库。
+## 5. 技术方案
 
-### 配置翻译引擎
+### 5.1 技术栈
+- **语言/UI：** ArkTS + ArkUI（声明式），MVVM
+- **SDK：** HarmonyOS NEXT，API 12+（以 DevEco Studio 当前稳定版为准）
+- **IDE：** DevEco Studio，模拟器 + 真机调试
+- **关键 Kit：**
+  - 网络：`@ohos.net.http`（封装重试、超时、流式 SSE）
+  - 存储：`@ohos.data.relationalStore`（历史/收藏）、`@ohos.data.preferences`（设置）
+  - 密钥：Asset Store Kit（关键资产加密存储 API Key）
+  - 语音：Core Speech Kit（TTS），ASR 评估系统/HMS 能力或大模型多模态 API
+  - OCR：HMS ML Kit 文字识别（P1 阶段调研）
+  - 卡片：Form Kit（P2）
 
-- 微软 Bing、有道两个免费通道默认启用，装完即翻
-- 其他引擎：应用内 **我的 → 翻译服务 → 添加服务商**，填入你在对应平台申请的凭证（BYOK，仅存本机，可先「测试连通」验证）
-- AI 引擎：选择预置模型或任意 OpenAI 兼容地址，填 Base URL + API Key + 模型名
-
-## 工程结构
-
+### 5.2 架构分层与核心抽象
 ```
-transharmony/
-├── AppScope/                    # 应用级配置（bundleName、应用名、版本）
-├── build-profile.json5          # 工程级构建配置（签名配置不入库）
-├── hvigor/hvigor-config.json5   # hvigor 构建工具版本
-├── tools/
-│   ├── mock-bob-plugin/         # 插件系统调试用 mock 翻译插件
-│   └── mock-ocr-plugin/         # 插件系统调试用 mock OCR 插件
-├── docs/
-│   ├── translation-providers.md          # 翻译引擎调研（签名方式 / 语言覆盖 / 合规）
-│   ├── PROJECT_PLAN.md                   # 项目内部规划与开发记录
-│   ├── CHANGELOG.md                      # 版本历史
-│   ├── ui-mockup.html                    # UI 设计稿 v0.2（采用稿）
-│   └── ui-mockup-v0.1-directionA.html    # UI 设计稿 v0.1（备份）
-└── entry/src/main/
-    ├── module.json5             # 权限声明（仅 INTERNET + GET_NETWORK_INFO + MICROPHONE）
-    ├── cpp/                     # 插件宿主 native 模块（JSVM 沙盒运行时）
-    └── ets/
-        ├── entryability/        # EntryAbility（启动时初始化存储与凭证）
-        ├── common/              # 通用 UI 工具（沉浸式避让等）
-        ├── pages/               # 翻译 / 历史 / 设置 / 服务商 / 图片翻译 / 插件实验室 / 关于等页面
-        ├── components/          # LangSelector、EngineSelector、AddProviderPanel 等
-        ├── models/              # 语言枚举、请求 / 响应类型
-        ├── services/            # 引擎适配器、插件系统、备份、敏感词过滤等核心业务
-        └── utils/               # HttpClient / HashUtil(签名) / JsonUtil 等工具
+UI 层（ArkUI @Component / @Builder）
+  ↓ 状态管理（AppStorage / @ObservedV2）
+领域层（TranslateUseCase、语言检测、限流风控）
+  ↓
+基础设施层
+  ├─ 引擎插件（统一 TranslatorAdapter 接口，可插拔）
+  ├─ 网络层（http 封装、SSE 流式解析）
+  └─ 数据层（RelationalStore / Preferences / AssetStore）
 ```
 
-## 架构：引擎插件化
-
-所有翻译服务（传统引擎、AI 模型、Bob 插件）实现统一的 `TranslatorAdapter` 接口，由 `EngineRegistry` 统一注册、`TranslateUseCase` 编排「取凭证 → 调引擎 → 存历史」，新增引擎 UI 零改动：
+**最重要的设计决策：引擎抽象。** 所有翻译服务（传统引擎 + 大模型）实现同一接口，新增引擎 = 新增一个 Adapter 文件，UI 不动：
 
 ```typescript
+interface TranslationRequest {
+  text: string;
+  from: LangCode | 'auto';
+  to: LangCode;
+  style?: 'plain' | 'polished' | 'formal' | 'casual'; // AI 引擎专用
+}
+
+interface TranslationResult {
+  text: string;
+  providerId: string;
+  detectedFrom?: LangCode;
+  usage?: { promptTokens?: number; completionTokens?: number };
+}
+
 interface TranslatorAdapter {
-  readonly id: string;            // 'baidu' | 'azure' | 'openai-compat' | ...
+  readonly id: string;            // 'baidu' | 'tencent' | 'deepseek' | 'glm' ...
   readonly label: ResourceStr;    // UI 显示名
   readonly isAI: boolean;
+  readonly supportsStyle: boolean;
   translate(req: TranslationRequest): Promise<TranslationResult>;
+  translateStream?(req: TranslationRequest): Promise<SSEStream>; // AI 流式
   supportedLangs(): LangCode[];
 }
 ```
 
-**新增引擎三步**：实现 `TranslatorAdapter` → 在 `EngineRegistry.init()` 注册 → 引擎胶囊与设置页自动出现。
+### 5.3 AI 接入方式
+- **BYOK 直连：** 设置页填 Base URL + API Key + Model（兼容 OpenAI Chat Completions 格式，DeepSeek/GLM/通义/Kimi 全兼容），Key 存 Asset Store。
+- **Prompt 设计：** 翻译指令 + 语言对 + 风格指令 + 「只输出译文」约束，长文分段并发。
+- **流式输出：** 解析 SSE，边生成边渲染（体验关键）。
 
-插件系统：JSVM 沙盒运行时（每插件独立全局隔离）、Bob API 兼容（$http / $data / $file 等按官方语义实现）、CommonJS 多文件 require、插件网络统一经应用 HTTP 客户端桥接。详见 [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)。
+---
 
-## 开发
+## 6. 排期规划
 
-- 路线图、已知限制与待办：[docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md)
-- 欢迎提交 Issue 与 PR
+**假设：单人业余开发，每周投入 15~20 小时，全程 AI 辅助编码。全职可将周期压缩约一半。**
 
-## 免责声明
+| 阶段 | 时间 | 里程碑 | 交付物 |
+|---|---|---|---|
+| 0 调研设计 | 9/7 – 9/20（2 周） | 方案定稿 | 原型图（已出 6 核心屏，见 [docs/ui-mockup.html](docs/ui-mockup.html)）、引擎选型结论、UI 规范 |
+| 1 MVP | 9/21 – 10/18（4 周） | 可用的文本翻译 App | P0 全部：双引擎翻译、历史、收藏、设置 |
+| 2 打磨内测 | 10/19 – 11/8（3 周） | 内测版 | P1 前半：AI 模式 + BYOK + 流式输出 |
+| 3 首次上架 | 11/9 – 11/22（2 周） | **上架华为应用市场** | 隐私政策、商店素材、审核通过 |
+| 4 竞争力迭代 | 11/23 – 12/20（4 周） | v1.1 | 语音翻译、拍照翻译、双引擎对照、润色指令 |
+| 5 复盘 | 12/21 – 12/31（1.5 周） | 数据复盘 | 下载/留存/付费数据，决定是否做 P2 |
 
-- 本应用不内置任何服务商密钥；除两个免费通道外，所有引擎均需用户自行注册并配置凭证（BYOK），相关费用与本应用无关
-- 微软 Bing、有道「免费通道」为非官方公开接口，仅供学习研究使用，不保证稳定性，请自行遵守相关服务条款
-- AI 生成内容请注意甄别；译文质量因引擎而异
+**里程碑风险缓冲：** 上架审核存在被拒可能，预留 2 次提审缓冲；MVP 若延期 1 周，砍「双引擎」为「单引擎」，保上架时间点。
 
-## License
+---
 
-[Apache-2.0](LICENSE) © 2026 TonyKingWJX
+## 7. 引擎选型（简版）
+
+| 引擎 | 免费额度（个人开发者，编写时参考） | 接入难度 | 定位 |
+|---|---|---|---|
+| **微软 Bing 免费通道** | 无官方额度（按 IP 限流，单次 1000 字符） | 中（页面抓 token） | **默认引擎，开箱即翻**；实测双向可达（2026-09-05） |
+| **有道免费通道** | 无官方额度（单次 1000 字符） | 低（无签名，POST 表单） | **已接入**，主页四大免费通道之一 |
+| ~~阿里翻译免费通道~~ | — | — | **暂缓**：x5sec 滑块风控端侧无法稳定通过，适配器代码保留，待自建代理后恢复 |
+| 腾讯云 TMT | 每月 500 万字符免费 | 中（TC3 签名） | 免费层主力，量大管饱（引擎面板可选） |
+| **阿里云机器翻译（alimt）** | 通用版每月 100 万字符免费 | 中（RPC HMAC-SHA1 签名） | **已接入（2026-09-05）**，官方 API，AccessKey 型 BYOK |
+| Azure Translator | F0 层每月 200 万字符 | 低（请求头认证） | 已接入，100+ 语言覆盖最广（引擎面板可选） |
+| 百度翻译开放平台 | 标准版免费（QPS=1 严格） | 低（MD5 签名） | 备用引擎（引擎面板可选） |
+| DeepSeek / GLM / 通义 | 无免费额度，但极便宜 | 低（OpenAI 兼容格式） | BYOK 首批支持 |
+
+详细调研（签名方式、语言覆盖、合规注意）见 [docs/translation-providers.md](docs/translation-providers.md)。
+> ⚠️ 价格与免费额度随时变动，接入前以各官网最新政策为准。
+
+---
+
+## 8. 风险与应对
+
+| 风险 | 等级 | 应对 |
+|---|---|---|
+| **系统自带翻译是最大竞品**（小艺/智慧识屏免费且系统级） | 🔴 高 | 不拼「能不能翻」，拼 AI 质量、多引擎对比、润色解释、细分场景 |
+| 免费额度被脚本滥用刷爆 | 🔴 高 | 设备级限流、每日额度、风控埋点；BYOK 用户不占额度 |
+| AI 编码时幻觉不存在的鸿蒙 API | 🟡 中 | 所有 `@ohos.*` / Kit 调用对照官方 API 文档逐个验证 |
+| 应用市场审核（隐私、第三方数据传输声明） | 🟡 中 | 提前写隐私政策，明示译文上传第三方引擎；个人账号备齐材料 |
+| 内置 AI 模式的服务器成本与备案 | 🟡 中 | 初期只做 BYOK 零服务器；验证需求后再上代理 |
+| 单人项目烂尾 | 🟡 中 | MVP 范围从紧（6 个功能），先上架再迭代，不追求一步到位 |
+
+---
+
+## 9. 待决策清单（开工前需要定）
+
+- [x] **应用名与品牌**：中文名已定「鸿译」，英文名保留 TransHarmony（2026-09-06）；包名 com.transharmony.app 不变；上架前仍需应用市场重名检测
+- [ ] **开发者账号类型**：个人 vs 企业（影响审核类目与部分 API 权限）
+- [ ] **首发引擎组合**：当前建议 腾讯云（主力）+ 百度（备用）
+- [ ] **首发语言对范围**：建议 中英/中日/中韩 + 自动检测，不追求 70+ 全量
+- [ ] **UI 风格**：已出 2 版风格稿，**采用第二版（官方规范版）**：[docs/ui-mockup.html](docs/ui-mockup.html)（对齐 huawei-docs/design-guides 色彩 Token、悬浮式胶囊页签 248×56vp、沉浸光感材质、半模态面板）；第一版风格稿备份于 [docs/ui-mockup-v0.1-directionA.html](docs/ui-mockup-v0.1-directionA.html)，后续可按此细化剩余页面
+
+## 10. 如何开始（环境准备）
+
+```bash
+# 1. 安装 DevEco Studio（华为官方，内置 SDK 管理器）
+#    https://developer.huawei.com/consumer/cn/deveco-studio/
+# 2. 打开本仓库根目录（已是一个完整 hvigor 工程），File → Open 即可
+# 3. 申请引擎账号：
+#    - 腾讯云 TMT（机器翻译）：console.cloud.tencent.com
+#    - 百度翻译开放平台：fanyi-api.baidu.com
+#    - AI 引擎（可选其一）：DeepSeek / 智谱开放平台 / 阿里百炼 / Moonshot
+```
+
+**首次运行步骤：**
+1. DevEco Studio 打开工程 → 等待 Sync 完成（会自动安装 oh_modules 依赖）
+2. 在模拟器或真机上运行（compatibleSdkVersion 6.1.1(24)，兼容 HarmonyOS 6.1.1 及以上设备）
+3. 进入「我的」Tab 填入引擎凭证（见上）→ 回「翻译」Tab 即可使用
+
+### 10.1 工程目录结构
+
+```
+harmony-translator/
+├── AppScope/                    # 应用级配置（bundleName、应用名「鸿译」、版本 1.0.0）
+├── build-profile.json5          # 工程级构建配置（compatible/target 6.1.1(24)，编译用 DevEco 内置 SDK）
+├── hvigor/hvigor-config.json5   # 构建工具版本（hvigor 6.26.4, modelVersion 26.0.0）
+├── docs/
+│   ├── translation-providers.md          # 引擎调研文档
+│   ├── ui-mockup.html                    # UI 设计稿 v0.2（采用稿，对齐鸿蒙官方设计规范）
+│   └── ui-mockup-v0.1-directionA.html    # UI 设计稿 v0.1（风格方向 A 备份）
+└── entry/src/main/
+    ├── module.json5             # 权限声明（仅 INTERNET + GET_NETWORK_INFO + MICROPHONE）
+    └── ets/
+        ├── entryability/        # EntryAbility（启动时初始化存储与凭证）
+        ├── common/              # Ux：沉浸式避让、底部渐隐蒙版等通用 UI 工具
+        ├── pages/               # Index(Navigation路由) + 翻译/历史/设置/服务/配置/图片翻译/关于等页面
+        ├── components/          # LangSelector、EngineSelector（胶囊+拖拽排序）、AddProviderPanel、PasswordDialog（备份密码弹窗）
+        ├── models/              # TranslationTypes：语言枚举、请求/响应类型
+        ├── services/            # 核心业务层（引擎插件/编排 + SettingsStore + AssetVault(密钥资产) + BackupService + SensitiveFilter）
+        └── utils/               # HttpClient / HashUtil(签名) / JsonUtil / AiModelApi(模型列表) / ImagePickerUtil / TransImageStore
+```
+
+**pages 一览**：`TranslatePage`（翻译主页）、`HistoryPage`（历史）、`HistoryDetailPage`（历史详情）、`SettingsPage`（我的）、
+`ServicesPage`（翻译服务一级页）、`BuiltinServicesPage`（服务商管理：分组/开关/拖拽排序/添加面板）、
+`ServiceConfigPage`（服务商凭证配置+连通测试）、`ImageTranslatePage`（图片翻译二级页）、
+`AboutPage`（关于/隐私政策/用户反馈交流）。
+
+### 10.2 核心设计：引擎插件化
+
+所有翻译服务实现 `TranslatorAdapter` 接口（`services/TranslatorAdapter.ets`），
+由 `EngineRegistry` 统一注册，`TranslateUseCase` 编排「取凭证 → 调引擎 → 存历史」：
+
+```
+UI (TranslatePage)
+  → TranslateUseCase.translate(text, from, to, engineId)
+      → settingsStore 读凭证 → 注入 adapter
+      → adapter.translate(req)         # TencentAdapter / BaiduAdapter / OpenAICompatAdapter
+      → historyStore.add(...)          # 写入历史
+```
+
+**新增引擎三步**：实现 `TranslatorAdapter` → 在 `EngineRegistry.init()` 注册 → UI（引擎胶囊、设置页）自动出现，零改动。
+
+---
+
+## 11. 工程现状（截至 2026-09-13，v1.0.2）
+
+### 11.1 已实现 ✅
+
+**插件系统（Bob 插件兼容，v1.0.1 新增）**
+- ✅ **插件导入**：从文件管理器导入 .bobplugin（zip：info.json + main.js），info.json 按官方 schema 校验；本期支持翻译类，导入 OCR/TTS 插件时识别类型并提示后续开放
+- ✅ **插件服务管理页**（我的 → 翻译服务 → 插件服务）：已装插件列表，行内开关（参与引擎行/聚合）、删除（二次确认，连带清理沙箱目录与 ASSET 密钥）、点击进插件配置页
+- ✅ **插件即引擎**：自动出现在主页引擎行，支持拖拽排序、管理态停用、聚合并发、单引擎翻译、历史记录——全部复用现有引擎体系
+- ✅ **插件配置页**：表单由 info.json 的 options 动态渲染（text 单行 / menu 下拉 / textConfig.secure 密码框 / 多行 / placeholder / defaultValue）；**显示名可编辑**（同步引擎行与插件列表）；secure 选项存 Asset Store Kit（与官方服务商同安全等级）；保存后下次翻译自动带新配置重载
+- ✅ **测试连通**：优先调用插件自定义 pluginValidate(completion)，未实现自动回退标准试译
+- ✅ **插件沙盒运行时**：JSVM 内嵌标准 JS 引擎（native 同步桥 + 消息泵），每插件独立 Env 全局隔离；异步超时回收、废弃调用隔离、重复初始化幂等
+- ✅ **Bob API 全套按官方语义实现**：$http（request/get/post、handler+Promise 双形态、data 自动 JSON 解析、body 按 Content-Type 编码）、$log、$info、$option、$env、$timer、$signal、$data（全套字节编解码）、$file（/ 只读 + $sandbox 可写，9 函数）
+- ✅ **CommonJS 多文件插件**：包内 require/exports/module + 宿主内置 crypto-js 模块（MD5/编码器）；浏览器/Node 习惯全局 polyfill（btoa/atob/console/setTimeout 家族/TextEncoder）
+- ✅ **词典结果（toDict）**：查词类插件按词头/音标/词性释义拼可读文本
+- ✅ **HTTP 桥**：插件网络经应用统一发起（复用应用 HTTP 客户端），任何 HTTP 响应回 envelope 由插件判断（Bob 语义），仅传输层失败 reject
+- ✅ **真实验证**：彩云小译 / 有道 / DeepL / 火山 等 akl 系免费插件导入即用，聚合并发正常
+
+**插件系统（manggo 插件兼容，v1.0.2 新增）**
+- ✅ **.mplugin 导入**：manggo.plugin.json 清单校验（manifestVersion 1 / runtime manggo.plugin.v1），多服务插件（translation/ocr/speech；wordbook/action 暂不支持并明确提示）
+- ✅ **多服务模型**：一包多服务逐服务建实例（id=plugin-<pid>#<sid>）；配置页统一服务列表（勾选启用 + 点行切换逐服务配置，config 表单 text/select/password/textarea/integer/decimal/boolean，password 存 Asset Store Kit）；翻译服务勾选制进引擎行
+- ✅ **ESM 转换层**：export 剥离 / import 重写为沙盒 require（node:crypto 内置 md5/sha1/sha256，相对导入走既有 CommonJS）
+- ✅ **fetch 完整语义**：Headers.get 大小写不敏感、body.getReader SSE 真流式（增量经桥回放）/非流式分块回放、text/json/arrayBuffer；node:crypto、fetch 挂全局
+- ✅ **语言码**：内部 zh/en ↔ manggo zh_CN/en_US 双向映射 + 清单 language 映射（manggo 码→第三方码）；词典（resultType=dictionary）结果展开
+- ✅ **生命周期加固**：ensureLoaded 并发去重；配置重载先销毁 Env 再全新加载（native unloadPlugin，Env 忙时拒绝销毁；修复 V8 "Cannot exit non-entered context" SIGTRAP 闪退）；启动时存量勾选归一化
+- ✅ **引擎卡死看门狗**：非流式 60s 总上限 / 流式 30s 无增量判死；聚合逐引擎 60s；测试连通不永久转圈；转圈中切换引擎即刻作废旧轮次并用新引擎重翻
+- ✅ **真实验证**：free-pack（5 翻译服务含有道词典流式/MD5 签名）与百炼（翻译+OCR，双服务独立配置）导入即用；Bob 插件全量回归通过
+
+**翻译引擎（12 个适配器：2 个免费通道开箱即翻 + 7 家 BYOK 传统 API + 2 类 AI 格式 / 7 个 AI 预置）**
+- ✅ `EdgeTranslatorAdapter` — **微软 Bing 免费通道（默认引擎）**：页面抓 token（缓存 30 分钟自动刷新）；已修 HTTP/2 下 411 问题（强制 HTTP/1.1），真机验证可用
+- ✅ `YoudaoAdapter` — **有道免费通道**，无签名开箱即翻，真机验证可用
+- ✅ `TencentAdapter`（腾讯云 TMT，TC3 签名）/ `AliyunAdapter`（阿里云，HMAC-SHA1）/ `BaiduAdapter`（MD5）/ `AzureAdapter`（请求头认证）/ `YoudaoZhiyunAdapter`（智云签名）/ `CaiyunAdapter`（彩云）/ `NiutransAdapter`（小牛）
+- ✅ `AlibabaAdapter` — 阿里网页通道**暂缓**（x5sec 风控端侧无法稳定通过，代码保留）；火山引擎适配器已移除（2026-09-10）
+- ✅ AI：`OpenAICompatAdapter`（DeepSeek/GLM/通义/Kimi 预置 + 任意 OpenAI 兼容自定义）+ `AnthropicAdapter`（Anthropic 协议预置 + 兼容自定义）；支持自定义 API 地址、模型名（**自动获取模型列表，Select 下拉选择**）、自定义翻译 Prompt
+- ✅ **连通测试**：配置页填好凭证一键试译验证，无需先保存
+
+**核心功能**
+- ✅ 文本翻译：自动检测源语言、智能语言对（中文→英/外文→中）、单引擎/聚合模式（并发所有引擎、逐个返回、耗时展示、一键采用）
+- ✅ 译文操作：复制 / 重译 / **朗读（TTS，支持暂停/继续）**
+- ✅ 服务商管理：免费通道 / 传统 / AI 三类独立分组，行内开关、删除（二次确认）、**组内长按拖拽排序**（顺序传导到聚合并发顺序与引擎 chips）；「添加服务商」面板（已组件化，翻译页与图片翻译页共用，**bindSheet 半模态**：页面级蒙层盖住底部页签，返回键/蒙层点击关闭不退出应用）
+- ✅ 历史记录：RelationalStore 存储、@ObservedV2 + 数据版本号广播（三页签实时同步）、搜索、全部/收藏分段、语言对筛选 chips、星标、**回收站（软删除保留 30 天：恢复/彻底删除/一键清空，左滑操作）**、多选批量删除（长按进多选，悬浮胶囊操作条）、**详情页**（重译/朗读/收藏）、清空二次确认
+- ✅ 语音输入：Core Speech Kit ASR（recognitionMode 0 引擎内部录音），**支持暂停/继续**（暂停即收尾出文本并自动翻译，继续开新会话接续识别），识别完成自动翻译；收音/暂停按钮三态高亮
+- ✅ 图片翻译：拍照（cameraPicker，照片进沙箱**不进相册**）或相册选图 → **独立二级页**（上半屏图片预览可保存/重选/重拍，下半屏 bindSheet 三档拖拽半模态翻译面板）→ 端侧 OCR（Core Vision Kit）自动翻译；页面销毁照片即焚；拍照可选「保存到相册」（**SaveButton 安全控件**临时授权，不申请任何权限）
+- ✅ 朗读 TTS：Core Speech Kit（中/英，其他语种按钮置灰「不支持」）；**播放/暂停/继续**（`playType:0` 官方 speakOnData 模式 + PCM 按 sequence 排序 + AudioRenderer 自播）；输入框朗读只读输入、译文朗读只读译文，互相独立
+- ✅ AI 合规提示：AI 引擎译文卡与译文框下方展示「内容由AI生成，请仔细甄别」
+- ✅ 应用内备份与恢复：全部历史（含回收站）+ 服务商配置（含密钥）+ 偏好设置，**用户密码 PBKDF2 派生 AES-256-GCM 整包加密**（.htrans），落 Download/<包名>/ 免权限；图片翻译原图可选携带；恢复支持历史合并去重/覆盖、文件选择器拉起
+- ✅ 敏感词合规检测：DFA 字典树（rawfile 词库按类别分组），命中硬拦截类拒译——不发网络请求、不写历史、不回显命中词；归一化防简单绕过，词库懒加载不阻断主流程
+- ✅ 交互状态：朗读/语音/拍照按钮均为独立 @Builder 三态高亮（修复 @Builder 值参数不刷新问题）；切语言/引擎自动停止朗读与识别；等待动画改原生 LoadingProgress 按钮
+
+**UI / 体验**
+- ✅ v0.2 设计稿落地：悬浮胶囊页签（248×56vp）、官方语义色 Token（base+dark 双资源）、沉浸光感
+- ✅ 宽屏适配：≥600vp（平板/横屏/自由多窗）翻译页切**双列工作台**（输入卡左列、译文右列），内容限宽居中
+- ✅ 深色模式全面适配（含开屏背景色 `start_window_background` 深色变体）
+- ✅ 沉浸式：全屏布局 + 避让收口（Ux.ets）；底部渐隐蒙版按官方规范校准（页签顶 +16vp）；添加服务商面板蒙层正确覆盖状态栏（修复 expandSafeArea 因父 padding 失效问题）
+- ✅ 应用图标：1024×1024 官方分层图标（背景层无透明像素合规）；开屏图标 512×512 圆角（官方蒙版比例）
+- ✅ 「我的」页：隐私政策二级页（完整条款）、关于二级页（版本更新日志）、用户反馈交流页（QQ 群号可复制 + 群二维码）、拍照保存开关、**备份/恢复入口（上次备份时间 + 密码弹窗）**
+- ✅ 服务商配置页含免责声明（费用与本应用无关）
+- ✅ 权限最小化：INTERNET + GET_NETWORK_INFO + MICROPHONE（语音输入），无相册/存储权限（保存走安全控件）
+
+### 11.2 已知限制与待办（按优先级）
+
+- [x] ~~**凭证明文存 Preferences**~~ ✅ 已迁移 Asset Store Kit（2026-09-11）：密钥类字段（ConfigField.secret）落系统关键资产加密存储，services_list JSON 不再含明文；云备份恢复不携带凭证（系统 ASSET 限制），跨设备迁移走应用内加密备份 / 手机克隆
+- [x] ~~**AI 引擎无流式输出**~~ ✅ 已实现：OpenAICompat / Anthropic / 插件 translateStream（SSE），逐字输出
+- [x] ~~「插件翻译服务」入口已预留，暂未开放~~ ✅ 已上线（v1.0.1）：Bob 插件系统全量落地
+- [x] ~~**插件：流式**~~ ✅ 已实现：$http.streamRequest/streamHandler（SSE 经桥逐块回放）+ query.onStream（Bob）/ options.setResult（manggo）；~~取消~~ cancelSignal 为占位（JSVM 无法中断在途调用，由轮次守卫 + 看门狗丢弃迟到结果替代）
+- [x] ~~**插件：$websocket 桥接**~~ ✅ 已实现：WsBridge（@ohos.net.websocket，open/send/close + 事件命令队列回放）
+- [x] ~~**插件：OCR 类支持**~~ ✅ 已完成：PluginOcrEngine（imageB64→$data.image、texts/regionInfos 解析、拍照翻译接入）；设置页可选 OCR 服务（仅启用的插件）
+- [x] ~~**插件：TTS 类支持**~~ ✅ 已完成：PluginTtsPlayback（url 直连 / base64 临时文件 → AVPlayer 状态机驱动）；朗读按钮语言支持按当前服务判定（系统仅中英，插件按声明）
+- [ ] **插件：语言选择器动态扩展**：插件支持但应用未收录的语言（粤语/文言文等）目前不可达，属产品决策
+- [x] ~~**插件：ESM 规范（Manggo）加载层**~~ ✅ 已完成（v1.0.2）：ESM 转换层（export 剥离 / import 重写为沙盒 require + node:crypto）+ .mplugin 多服务模型 + source=manggo 标识。约束已遵守：不触碰用户桌面安装的 Manggo 程序，测试样本由用户提供
+- [ ] **插件：manggo wordbook（生词本）/ action（划词动作）服务**：宿主暂无生词本/划词助手承载功能，导入时明确提示不支持
+- [ ] **插件：manggo 服务级 main 专用脚本 / 服务图标**：当前仅用 runtime.main 主脚本，列表用首字头像
+- [ ] **插件：包内多文件 ESM 相对导入**：附加 .js 按 CommonJS 处理，若模块文件也是 ESM 会报错（主流插件均单文件自包含，暂无实际样本）
+- [ ] **插件：同插件双翻译服务同时流式会互相串流**（流式监听按插件键控；单翻译服务插件无影响）
+- [ ] **插件：fetch 二进制请求体**按 UTF-8 文本近似（暂无实际样本需要）
+- [ ] **插件：Bob appcast 自动更新、info.json 多图标/isKeyOption** 未处理
+- [ ] **插件：插件市场 / 在线安装** 未做（当前均为本地文件导入）
+- [ ] **插件：诊断日志降级**：实验室调试页（PluginLabPage）与内置 mock（rawfile mock.bobplugin / tools mock-manggo）上架前移除/隐藏
+- [ ] 聚合模式未做「按质量排序」（需译文质量评估，P2 再议）
+- [ ] 历史页语言对筛选仅中英/中日/中韩三组，其余走「全部」+ 搜索
+- [ ] 单元测试未搭建（hypium 随后续配置）
+- [ ] 上架材料：应用内隐私政策页 ✅ 已完成；商店截图/简介、AGC 应用信息配置待办
+- [ ] 待决策：开发者账号类型（个人 vs 企业）
+
+### 11.3 P1/P2 规划对照
+
+| 规划项 | 状态 |
+|---|---|
+| P0 文本翻译 / 多引擎 / 译文操作 / 历史 / 收藏 / 设置 | ✅ 全部完成 |
+| P1 AI 翻译 + BYOK | ✅ 完成（含流式输出） |
+| P1 插件生态（Bob + manggo 兼容） | ✅ 完成（Bob 翻译/OCR/TTS；manggo 三类服务、多服务勾选制；稳定性加固） |
+| P1 译文润色/解释 | ✅ 完成（AI 风格指令 chips） |
+| P1 双引擎对照 | ✅ 完成（聚合模式） |
+| P1 语音翻译 | ✅ 完成 |
+| P1 拍照翻译 | ✅ 完成（独立二级页） |
+| P1 插件系统（Bob .bobplugin 翻译类） | ✅ 完成（流式/取消/$websocket/OCR/TTS/ESM 见 11.2 待办） |
+| P2 折叠屏/平板适配 | 🟡 部分（≥600vp 宽屏双列工作台已做；折叠屏展开态/多端协同未做） |
+| P2 对话翻译 / 元服务卡片 / 长文分段 / 离线包 | ❌ 未开始（按规划待 PMF 验证后） |
+
+## 12. 版本历史
+
+### v1.0.2（2026-09-13，真机迭代中）
+- **新增 manggo 插件兼容**：.mplugin 导入即用，翻译 / OCR / TTS 三类服务全覆盖；多服务插件（一包多服务/翻译+OCR 混合）配置页统一勾选启用、逐服务独立配置
+- **manggo 插件沙盒**：ES Module 转换层（import 重写 + node:crypto md5/sha1/sha256 内置）、fetch 完整语义（SSE 真流式 getReader、Headers.get）、语言码双向映射、词典结果展开
+- **插件生命周期加固**：加载并发去重；配置重载先销毁 Env 再全新加载（修复 V8 "Cannot exit non-entered context" SIGTRAP 闪退）
+- **引擎卡死看门狗**：非流式 60s 总上限、流式 30s 无增量判死；聚合逐引擎 60s；测试连通不永久转圈；转圈中切换引擎即刻作废旧轮次并用新引擎重翻
+- **多服务插件引擎行勾选制**：默认不铺满主页引擎行，勾选才显示并参与聚合并发
+- **界面修复**：输入框光标顶部被圆角裁剪区截断（官方说明：显式 borderRadius(0)）
+
+### v1.0.1（2026-09-12，真机迭代中）
+- **新增 Bob 插件系统**：文件管理器导入 .bobplugin 翻译插件，即装即用；插件即引擎（主页引擎行、拖拽排序、开关、删除、聚合并发、历史记录全支持）
+- **插件服务管理页**：我的 → 翻译服务 → 插件服务，已装插件统一管理；点击进插件配置页
+- **插件配置页**：表单由 info.json options 动态渲染（文本/下拉/密码框/多行/placeholder/默认值）；显示名可编辑并同步引擎行；secure 选项存 Asset Store Kit；测试连通优先插件自定义 pluginValidate、回退标准试译
+- **插件沙盒运行时**：JSVM 内嵌标准 JS 引擎，每插件独立 Env 全局隔离；CommonJS 多文件 require（内置 crypto-js）；$http/$log/$info/$option/$env/$timer/$signal/$data/$file 全套 API 按官方语义实现
+- **词典结果（toDict）**：查词类插件输出词头/音标/词性释义
+- **插件网络经应用统一发起**：复用应用 HTTP 客户端（含超时），HTTP 响应完整回传插件判断（Bob 语义）
+- 真机适配与修复：冷启动引擎列表竞态（ready 门 + 广播）、插件加载/调用超时兜底、错误原因透传、原生 LoadingProgress 等待动画
+- 真实验证：彩云小译/有道/DeepL/火山等免费插件导入即用，聚合并发正常
+
+### v1.0.0（2026-09-11，真机迭代中）
+- **凭证加密存储**：服务商密钥类字段迁移 Asset Store Kit（AES256-GCM + 可信执行环境），Preferences 中不再落明文；应用内备份/恢复接口不变，手机克隆可携带凭证
+- **应用内备份与恢复**：历史+服务商+偏好整包 AES-256-GCM 加密（.htrans），密码弹窗设置/输入，恢复支持合并去重/覆盖；图片翻译原图可选携带
+- **敏感词合规检测**：DFA 字典树，命中硬拦截类拒译（不发网络请求、不写历史、不回显命中词）
+- **平板/折叠屏适配**：官方四级断点（sm/md/lg/xl），翻译页 md/lg 双列工作台（等高对齐、内容区分级限宽）、历史/详情页限宽分级、半模态大屏自动居中跟手弹窗（SheetType.POPUP）
+- 历史记录新增**回收站**：删除走软删除保留 30 天，支持恢复 / 彻底删除 / 一键清空；回收站左滑操作
+- 历史记录新增**详情页**：点击记录进二级页（重译/朗读/收藏）；多选批量删除（长按进多选）
+- 「添加服务商」面板改 **bindSheet 半模态**：页面级蒙层盖住底部页签，返回键/蒙层点击关闭不退出应用；`$$` 双向绑定修复关闭后再次弹出无响应
+- 真机修复：页签切换整页转场动画在真机上抽搐/角落飞入（去掉整页转场，官方页签即切）；多选批量删除无响应（V2 `@Local` 代理数组直接传 RDB `in()` 抛异常，store 层 `slice()` 剥离 + 失败 toast）；多选悬浮操作条改 FAB 模式（列表底部留滚动余量，最后一张卡不再被遮挡）；列表边缘渐隐与底部留白平衡（卡片滚动进出边缘柔和渐隐、静止完整显示）
+- 服务商体系重构：免费通道/传统/AI 三类独立分组管理，行内开关、删除、组内拖拽排序；「添加服务商」面板组件化
+- 图片翻译升级为独立二级页：拍照/相册取图 → 上半屏预览（保存/重选/重拍）+ 下半屏三档拖拽半模态翻译面板，页面销毁照片即焚
+- 历史记录页重构：@ObservedV2 + 数据版本号广播，三页签实时同步；存储 schema 增强
+- 宽屏适配：≥600vp 平板/横屏切双列工作台
+- AI 合规提示（「内容由AI生成」）、模型选择改 Select 下拉、设置页卡片布局优化
+- 关于页完善：完整隐私政策二级页、用户反馈交流页（QQ 群号 + 群二维码）
+- 移除火山引擎适配器；HTTP 客户端与配置页优化；签名配置更新
+
+### v0.2.0（2026-09-09，真机迭代中）
+- 新增 AI 翻译服务商：OpenAI 兼容（DeepSeek/GLM/通义/Kimi）+ Anthropic 协议，自动获取模型列表，自定义翻译 Prompt
+- 新增拍照翻译（端侧 OCR）与语音输入（ASR），照片默认不进相册，可选 SaveButton 安全控件保存
+- 新增译文/输入朗读（TTS 暂停/继续）、语言不支持置灰提示
+- 新增连通测试、配置页免责声明、隐私说明与关于页（含更新日志）
+- 修复：微软通道 411（强制 HTTP/1.1）、ASR 会话残留、相机沙箱文件读取、面板状态栏沉浸、内置服务页面板布局、@Builder 状态刷新等十余项真机问题
+- 图标：官方规范分层图标 + 圆角开屏图标 + 开屏深色背景
+
+### v0.1.0（2026-09-04）
+- 首版：聚合并发多引擎翻译、内置免费通道开箱即翻、BYOK 服务商管理、历史记录、悬浮胶囊页签、深浅色主题
+
+---
+
+*最后更新：2026-09-11 · 项目状态：v1.0.0 功能开发完成，真机验证通过，待上架准备（凭证加密、商店素材、AGC 配置）*

@@ -408,9 +408,11 @@ export struct HistoryDetailPage {
                   .fontSize(15)
                   .fontColor($r('app.color.font_primary'))
                   .backgroundColor(Color.Transparent)
+                  // 官方说明：输入框 left/right padding 为 0 时，光标可能被默认圆角裁剪区截断，显式清零（harmonyos-references/ts-basic-components-textinput）
+                  .borderRadius(0)
                   .constraintSize({ minHeight: 72, maxHeight: 180 })
                   // 上下保留内边距 + includeFontPadding 防首行截断（对齐主页/图片页写法）
-                  .padding({ left: 0, right: 0, top: 6, bottom: 6 })
+                  .padding({ left: 0, right: 0, top: 12, bottom: 6 })
                   .includeFontPadding(true)
                   .width('100%')
                   .onChange((value: string): void => {

@@ -5,13 +5,17 @@
  *   敏感个人信息段落加粗突出展示。
  *   首启的标准隐私弹窗由系统自动弹出，应用内不得自绘隐私同意弹窗（否则上架审核驳回）。
  * - AboutPage：应用信息卡 + 更新内容（版本历史，新版本在上）；用户反馈交流入口已上移至设置页「关于」卡
+ *   连点应用信息卡 5 次（2 秒内）弹窗确认后开启开发者模式：卡下方出现「开发者模式」行（开关 + 二级页入口），
+ *   开关关闭后入口隐藏、日志系统同步停采并清空
  * - FeedbackPage：用户反馈交流 QQ 群（群号可复制 + 群二维码）
  * 沉浸式与自定义标题栏样式与其他 NavDestination 页保持一致。
  */
 
 import { pasteboard } from '@kit.BasicServicesKit';
+import { settingsStore } from '../services/SettingsStore';
+import { devLogStore } from '../services/DevLogStore';
 
-export const APP_VERSION: string = 'v1.0.1';
+export const APP_VERSION: string = 'v1.0.2';
 
 /** 开发者/运营者名称：须与 AppGallery Connect 上提交的开发者名称保持一致（审核要求） */
 export const DEVELOPER_NAME: string = '鸿译开发团队';
@@ -27,9 +31,22 @@ interface UpdateEntry {
 
 const UPDATE_LOG: UpdateEntry[] = [
   {
+    version: 'v1.0.2',
+    date: '2026-09-13',
+    current: true,
+    items: [
+      '新增 manggo 插件支持：导入 .mplugin 即装即用，翻译 / 文字识别 OCR / 语音 TTS 全覆盖',
+      '多服务插件：一个插件包含多个服务（如多个翻译引擎、翻译+OCR），配置页统一勾选启用、逐服务独立配置',
+      '插件服务自主可控：多服务插件默认不铺满主页，勾选哪些显示哪些，未勾选的不参与聚合',
+      'manggo 插件沙盒：ES Module 自动转换、fetch 流式（SSE）、常用哈希、语言码自动映射、词典结果展开',
+      '稳定性：修复插件重载可能引发的闪退；引擎卡死自动中断并提示，切换引擎即刻恢复翻译',
+      '界面修复：输入框光标顶部被裁切的问题'
+    ]
+  },
+  {
     version: 'v1.0.1',
     date: '2026-09-12',
-    current: true,
+    current: false,
     items: [
       '新增插件系统：从文件管理器导入 .bobplugin 翻译插件，即装即用',
       '插件即引擎：自动出现在主页引擎行，支持拖拽排序、开关与删除',
@@ -508,6 +525,66 @@ export struct AboutPage {
   @Consume('navPathStack') pathStack: NavPathStack;
   @StorageProp('ux_statusBarH') statusBarH: number = 0;
   @StorageProp('ux_navBarH') navBarH: number = 0;
+  /** 开发者模式开关（EntryAbility 启动时写入 AppStorage，经 @StorageLink 跨页同步 + 持久化） */
+  @StorageLink('dev_mode') devMode: boolean = false;
+  /** 连点计数：2 秒窗口内累计应用信息卡点击次数 */
+  private tapCount: number = 0;
+  private lastTapAt: number = 0;
+
+  private toast(msg: string): void {
+    this.getUIContext().getPromptAction().showToast({ message: msg });
+  }
+
+  /** 连点应用信息卡：2 秒内累计 5 次触发确认弹窗；已开启时提示不重复弹 */
+  private onLogoTap(): void {
+    const now = Date.now();
+    this.tapCount = now - this.lastTapAt <= 2000 ? this.tapCount + 1 : 1;
+    this.lastTapAt = now;
+    if (this.tapCount < 5) {
+      return;
+    }
+    this.tapCount = 0;
+    if (this.devMode) {
+      this.toast('开发者模式已开启');
+      return;
+    }
+    this.confirmDevMode();
+  }
+
+  /** 开发者模式确认弹窗：打开 → 出现开发者模式行与开关；取消 → 画面无变化 */
+  private confirmDevMode(): void {
+    this.getUIContext().showAlertDialog({
+      title: '打开开发者模式？',
+      message: '开发者模式包含插件实验室、日志系统等调试功能，仅供开发调试使用。',
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '打开',
+        fontColor: $r('app.color.brand'),
+        action: (): void => {
+          this.devMode = true;
+          settingsStore.setDevMode(true);
+          this.toast('您已打开开发者模式');
+        }
+      },
+      secondaryButton: {
+        value: '取消',
+        fontColor: $r('app.color.font_secondary'),
+        action: (): void => {
+          // 画面无变化，开发者模式保持默认关闭与隐藏
+        }
+      }
+    });
+  }
+
+  /** 开关联动：关闭时入口隐藏，日志系统同步停采并清空 */
+  private onDevModeToggle(on: boolean): void {
+    this.devMode = on;
+    settingsStore.setDevMode(on);
+    if (!on) {
+      devLogStore.disable();
+    }
+  }
 
   @Builder
   logEntry(e: UpdateEntry) {
@@ -623,6 +700,50 @@ export struct AboutPage {
             .backgroundColor($r('app.color.card_bg'))
             .border({ width: 0.8, color: $r('app.color.divider') })
             .alignItems(HorizontalAlign.Center)
+            .onClick(() => {
+              this.onLogoTap();
+            })
+
+            // ── 开发者模式（连点图标开启后显示；开关关闭即隐藏） ──
+            if (this.devMode) {
+              Column() {
+                Row({ space: 12 }) {
+                  Column({ space: 3 }) {
+                    Text('开发者模式')
+                      .fontSize(15)
+                      .fontColor($r('app.color.font_primary'))
+                    Text('插件实验室 · 日志系统（开发调试）')
+                      .fontSize(11)
+                      .fontColor($r('app.color.font_tertiary'))
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
+
+                  Toggle({ type: ToggleType.Switch, isOn: this.devMode })
+                    .width(40)
+                    .height(24)
+                    .selectedColor($r('app.color.brand'))
+                    .onChange((on: boolean) => {
+                      this.onDevModeToggle(on);
+                    })
+
+                  SymbolGlyph($r('sys.symbol.chevron_right'))
+                    .fontSize(14)
+                    .fontColor([$r('app.color.font_fourth')])
+                }
+                .width('100%')
+                .padding({ top: 13, bottom: 13 })
+                .alignItems(VerticalAlign.Center)
+                .onClick(() => {
+                  this.pathStack.pushPath({ name: 'DeveloperPage' });
+                })
+              }
+              .width('100%')
+              .padding({ left: 16, right: 16 })
+              .borderRadius(16)
+              .backgroundColor($r('app.color.card_bg'))
+              .border({ width: 0.8, color: $r('app.color.divider') })
+            }
 
             // ── 更新内容 ──
             Column({ space: 8 }) {

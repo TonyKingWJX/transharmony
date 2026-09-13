@@ -1,5 +1,6 @@
 import pluginHost from 'libpluginhost.so';
 import { getJson, postJson, postStream, RawResponse } from '../../utils/HttpClient';
+import { devLogStore } from '../DevLogStore';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 /**
@@ -44,6 +45,9 @@ export class HttpBridge {
       const header = (req['header'] ?? {}) as Record<string, string>;
       const rawBody = req['body'];
       const body = typeof rawBody === 'string' ? rawBody : '';
+      // 二进制请求体（manggo fetch 传 ArrayBuffer/TypedArray 时由沙盒 base64 透传）
+      const rawBodyB64 = req['bodyB64'];
+      const bodyB64 = typeof rawBodyB64 === 'string' ? rawBodyB64 as string : '';
       const rawTimeout = req['timeout'];
       const timeoutSec = typeof rawTimeout === 'number' ? rawTimeout : 60;
       const timeoutMs = Math.max(1000, Math.min(300000, timeoutSec * 1000));
@@ -82,11 +86,15 @@ export class HttpBridge {
         });
       } else {
         resp = await postJson({
-          url: url, headers: header, body: body, timeoutMs: timeoutMs, allowHttpError: true
+          url: url, headers: header, body: body,
+          bodyB64: bodyB64.length > 0 ? bodyB64 : undefined,
+          timeoutMs: timeoutMs, allowHttpError: true
         });
       }
       hilog.info(0x0001, 'HttpBridge', '%{public}s %{public}s -> %{public}d len=%{public}d',
         method, url, resp.status, resp.body.length);
+      devLogStore.append(resp.status >= 400 ? 'warn' : 'info', 'http',
+        `${method} ${url} → ${resp.status} (${resp.body.length}B)`);
       pluginHost.resolveHttp(httpId, 1, JSON.stringify({
         status: resp.status,
         headers: resp.headers,
@@ -96,6 +104,7 @@ export class HttpBridge {
       const msg = (e instanceof Error) ? e.message : String(e);
       hilog.error(0x0001, 'HttpBridge', '%{public}s %{public}s -> transport error: %{public}s',
         method, url, msg);
+      devLogStore.append('error', 'http', `${method} ${url} 传输失败：${msg}`);
       pluginHost.resolveHttp(httpId, 0, JSON.stringify({ message: msg }));
     }
   }

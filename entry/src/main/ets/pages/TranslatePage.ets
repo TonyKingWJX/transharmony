@@ -648,6 +648,15 @@ export struct TranslatePageContent {
       settingsStore.setEngineId(id);
     }
     AppStorage.setOrCreate('pref_engine_id', this.engineId);
+    // 卡死脱离：上一轮仍在转圈（引擎挂起/无响应）时切换引擎 →
+    // 作废旧轮次（seq 守卫使其回调全部失效）、立刻复位翻译按钮；有输入则用新引擎重翻
+    if (this.loading) {
+      this.runSeq++;
+      this.loading = false;
+      if (this.inputText.trim().length > 0) {
+        this.runTranslate();
+      }
+    }
   }
 
   private engineRowLabel(id: string): string {
@@ -989,9 +998,11 @@ export struct TranslatePageContent {
             .fontSize(16)
             .fontColor($r('app.color.font_primary'))
             .backgroundColor(Color.Transparent)
+                  // 官方说明：输入框 left/right padding 为 0 时，光标可能被默认圆角裁剪区截断，显式清零（harmonyos-references/ts-basic-components-textinput）
+                  .borderRadius(0)
             // 宽屏：填满 Stack（layoutWeight 分配的剩余高度），lg 档给更舒适的初始高度
             .constraintSize({ minHeight: this.isLg() ? 240 : 180 })
-            .padding({ left: 0, right: 0, top: 8, bottom: 26 })
+            .padding({ left: 0, right: 0, top: 14, bottom: 26 })
             .includeFontPadding(true)
             .width('100%')
             .height('100%')
@@ -1047,8 +1058,10 @@ export struct TranslatePageContent {
             .fontSize(16)
             .fontColor($r('app.color.font_primary'))
             .backgroundColor(Color.Transparent)
+                  // 官方说明：输入框 left/right padding 为 0 时，光标可能被默认圆角裁剪区截断，显式清零（harmonyos-references/ts-basic-components-textinput）
+                  .borderRadius(0)
             .constraintSize({ minHeight: 110, maxHeight: 180 })
-            .padding({ left: 0, right: 0, top: 8, bottom: 26 })
+            .padding({ left: 0, right: 0, top: 14, bottom: 26 })
             .includeFontPadding(true)
             .width('100%')
             .onChange((value: string): void => this.onInputChanged(value))

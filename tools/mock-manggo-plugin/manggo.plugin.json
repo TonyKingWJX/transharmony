@@ -1,0 +1,51 @@
+{
+  "manifestVersion": 1,
+  "id": "com.transharmony.mock.manggo",
+  "name": "Manggo Mock 插件",
+  "version": "0.1.0",
+  "description": "宿主联调用最小 manggo 插件：翻译（含流式/配置）+ OCR + TTS（WAV 字节归一化）",
+  "author": "transharmony",
+  "homepage": "https://github.com/Pylogmon/manggo-plugin",
+  "permissions": ["network"],
+  "runtime": { "kind": "bun", "api": "manggo.plugin.v1", "main": "main.js" },
+  "services": [
+    {
+      "id": "main",
+      "kind": "translation",
+      "displayName": "Mock 翻译",
+      "entry": "translate",
+      "resultType": "text",
+      "language": {
+        "zh_CN": "zh-Hans",
+        "en_US": "en-US",
+        "ja_JP": "ja-JP",
+        "ko_KR": "ko-KR",
+        "fr_FR": "fr-FR",
+        "de_DE": "de-DE",
+        "ru_RU": "ru-RU",
+        "es_ES": "es-ES",
+        "th_TH": "th-TH",
+        "vi_VN": "vi-VN"
+      },
+      "config": [
+        { "key": "echoPrefix", "label": "回显前缀", "control": "text", "default": "[M]", "placeholder": "留空则用默认" },
+        { "key": "apiKey", "label": "API 密钥（测试 ASSET 存储）", "control": "password" },
+        { "key": "enableStream", "label": "启用流式输出", "control": "boolean", "default": true },
+        { "key": "vendor", "label": "模拟接口风格", "control": "select", "default": "echo",
+          "options": [ { "label": "回显", "value": "echo" }, { "label": "大写", "value": "upper" } ] }
+      ]
+    },
+    {
+      "id": "ocr",
+      "kind": "ocr",
+      "displayName": "Mock 识别",
+      "entry": "recognize"
+    },
+    {
+      "id": "tts",
+      "kind": "speech",
+      "displayName": "Mock 语音",
+      "entry": "tts"
+    }
+  ]
+}

@@ -11,7 +11,8 @@ export const runTest: (script?: string, timeoutMs?: number) => Promise<string>;
 export const esmProbe: () => Promise<string>;
 
 export const initRuntime: () => Promise<string>;
-export const loadPlugin: (pluginId: string, code: string, configJson?: string, modulesJson?: string, pluginDir?: string, sandboxDir?: string, bundleName?: string) => Promise<string>;
+export const loadPlugin: (pluginId: string, code: string, configJson?: string, modulesJson?: string, pluginDir?: string, sandboxDir?: string, bundleName?: string, kind?: string) => Promise<string>;
+export const unloadPlugin: (pluginId: string) => Promise<string>;
 export const callPluginFn: (pluginId: string, fnName: string, argsJson: string, mode: string, timeoutMs: number) => Promise<string>;
 
 export const registerHttpHandler: (handler: (httpId: number, requestJson: string) => void) => void;

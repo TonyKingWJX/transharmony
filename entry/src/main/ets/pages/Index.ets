@@ -15,6 +15,8 @@ import { BuiltinServicesPage } from './BuiltinServicesPage';
 import { OfflineTranslatePage } from './OfflineTranslatePage';
 import { ServiceConfigPage } from './ServiceConfigPage';
 import { PrivacyPage, AboutPage, FeedbackPage } from './AboutPage';
+import { DeveloperPage } from './DeveloperPage';
+import { DevLogPage } from './DevLogPage';
 import { ImageTranslatePage, ImageTransParam } from './ImageTranslatePage';
 import { HistoryDetailPage, HistoryDetailParam } from './HistoryDetailPage';
 import { PluginLabPage } from './PluginLabPage';
@@ -44,12 +46,19 @@ function PageMap(name: string, param: object) {
   } else if (name === 'HistoryDetailPage') {
     HistoryDetailPage({ recordId: (param as HistoryDetailParam).id })
   } else if (name === 'PluginLabPage') {
-    // TODO(spike) 插件实验室调试页：JSVM spike 验证完成后连同入口一起移除
+    // 插件实验室调试页：入口已移入开发者模式页（关于页连点图标开启）
     PluginLabPage()
+  } else if (name === 'DeveloperPage') {
+    DeveloperPage()
+  } else if (name === 'DevLogPage') {
+    DevLogPage()
   } else if (name === 'PluginServicesPage') {
     PluginServicesPage()
   } else if (name === 'PluginConfigPage') {
-    PluginConfigPage({ pluginId: (param as Record<string, string>)['pluginId'] })
+    PluginConfigPage({
+      pluginId: (param as Record<string, string>)['pluginId'],
+      serviceId: (param as Record<string, string>)['serviceId'] ?? ''
+    })
   }
 }
 

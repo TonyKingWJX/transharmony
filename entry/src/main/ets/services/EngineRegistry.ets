@@ -15,7 +15,18 @@ import { OFFLINE_FEATURE_ENABLED } from './OfflineTranslator';
 import { ServiceItem, settingsStore } from './SettingsStore';
 import { findDef } from './ProviderCatalog';
 import { BobPluginAdapter } from './plugin/BobPluginAdapter';
-import { PLUGIN_DEF_PREFIX, identifierOfDef, pluginIdOfService, bobPluginEngine } from './plugin/BobPluginEngine';
+import { ManggoPluginAdapter } from './plugin/ManggoPluginAdapter';
+import {
+  PLUGIN_DEF_PREFIX,
+  identifierOfDef,
+  pluginIdOfService,
+  bobPluginEngine
+} from './plugin/BobPluginEngine';
+import {
+  splitServiceRef,
+  parseManggoServices,
+  isSupportedManggoService
+} from './plugin/ManggoTypes';
 
 /**
  * 引擎注册表：按「免费通道 + 用户服务列表」动态构建。
@@ -74,10 +85,29 @@ export class EngineRegistry {
 
   /** 为单个服务实例创建引擎（凭证由 TranslateUseCase 注入） */
   static createFor(s: ServiceItem): TranslatorAdapter | null {
-    // Bob 插件引擎（defId = 'plugin:<identifier>'）：仅翻译类进引擎行，
-    // TTS/OCR 插件由偏好设置中的服务选择调度（执行接入在后续版本）
+    // 插件引擎（defId 以 'plugin:' 开头）：
+    //  - Bob：'plugin:<identifier>'（单服务，category 单值）；
+    //  - Manggo：'plugin:<identifier>#<serviceId>'（多服务，kind=translation 进引擎行）。
+    // TTS/OCR 插件由偏好设置中的服务选择调度。
     if (s.defId.startsWith(PLUGIN_DEF_PREFIX)) {
-      const pluginId = identifierOfDef(s.defId);
+      const ref = identifierOfDef(s.defId);
+      if (ref.indexOf('#') >= 0) {
+        const parts = splitServiceRef(ref);
+        const rec = bobPluginEngine.record(parts.pluginId);
+        if (rec === undefined || rec.source !== 'manggo') {
+          return null;
+        }
+        const svc = parseManggoServices(rec.infoJson)
+          .find((m): boolean => m.id === parts.serviceId && m.kind === 'translation');
+        if (svc === undefined) {
+          return null;
+        }
+        const label = s.name.length > 0 ? s.name
+          : (svc.displayName.length > 0 ? svc.displayName : rec.name);
+        return new ManggoPluginAdapter(s.id, parts.pluginId, parts.serviceId, label,
+          svc.resultType, svc.languageJson);
+      }
+      const pluginId = ref;
       const rec = bobPluginEngine.record(pluginId);
       if (rec === undefined || rec.category !== 'translate') {
         return null;
@@ -156,7 +186,9 @@ export class EngineRegistry {
       if (svc !== undefined && svc.name.length > 0 && svc.name !== id) {
         return svc.name;
       }
-      const rec = bobPluginEngine.record(pluginIdOfService(id));
+      const ref = pluginIdOfService(id);
+      const pluginId = ref.indexOf('#') >= 0 ? splitServiceRef(ref).pluginId : ref;
+      const rec = bobPluginEngine.record(pluginId);
       if (rec !== undefined) {
         return rec.name;
       }
