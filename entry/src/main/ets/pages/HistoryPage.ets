@@ -25,6 +25,7 @@ import {
 } from '@kit.ArkUI';
 import { historyStore, HistoryItem, HistoryQuery, HISTORY_VERSION_KEY } from '../services/HistoryStore';
 import { TranslateUseCase } from '../services/TranslateUseCase';
+import { EngineRegistry } from '../services/EngineRegistry';
 import { TransImageStore } from '../utils/TransImageStore';
 import { LangCode } from '../models/TranslationTypes';
 
@@ -445,6 +446,10 @@ export struct HistoryPageContent {
     }
     if (item.engineId === 'baidu') {
       return '百度';
+    }
+    // Bob 插件引擎（id = 'plugin-<identifier>'）：显示插件名，而非原始服务 id
+    if (item.engineId.startsWith('plugin-')) {
+      return EngineRegistry.displayNameOf(item.engineId);
     }
     return item.engineId;
   }

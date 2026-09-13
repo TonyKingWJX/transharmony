@@ -15,7 +15,7 @@ import { OFFLINE_FEATURE_ENABLED } from './OfflineTranslator';
 import { ServiceItem, settingsStore } from './SettingsStore';
 import { findDef } from './ProviderCatalog';
 import { BobPluginAdapter } from './plugin/BobPluginAdapter';
-import { PLUGIN_DEF_PREFIX, identifierOfDef, bobPluginEngine } from './plugin/BobPluginEngine';
+import { PLUGIN_DEF_PREFIX, identifierOfDef, pluginIdOfService, bobPluginEngine } from './plugin/BobPluginEngine';
 
 /**
  * 引擎注册表：按「免费通道 + 用户服务列表」动态构建。
@@ -143,6 +143,25 @@ export class EngineRegistry {
 
   static byId(id: string): TranslatorAdapter | undefined {
     return EngineRegistry.adapters.find((a: TranslatorAdapter) => a.id === id);
+  }
+
+  /** 引擎显示名：注册表 label 优先；插件引擎已卸载/未注册时从服务表与安装记录兜底（历史记录回溯场景） */
+  static displayNameOf(id: string): string {
+    const hit = EngineRegistry.byId(id);
+    if (hit !== undefined) {
+      return hit.label;
+    }
+    if (id.startsWith('plugin-')) {
+      const svc = settingsStore.getService(id);
+      if (svc !== undefined && svc.name.length > 0 && svc.name !== id) {
+        return svc.name;
+      }
+      const rec = bobPluginEngine.record(pluginIdOfService(id));
+      if (rec !== undefined) {
+        return rec.name;
+      }
+    }
+    return id;
   }
 
   /** 服务列表（含开关），与引擎一一对应（免费通道除外） */

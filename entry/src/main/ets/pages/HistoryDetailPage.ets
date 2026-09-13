@@ -106,8 +106,7 @@ export struct HistoryDetailPage {
 
   /** 引擎名 · 语言对（译文卡 meta 行） */
   private engineLine(id: string): string {
-    const hit = EngineRegistry.byId(id);
-    return hit !== undefined ? hit.label : id;
+    return EngineRegistry.displayNameOf(id);
   }
 
   private pairLine(from: string, to: string): string {

@@ -15,8 +15,16 @@ import { LANGUAGE_LIST, LangCode } from '../../models/TranslationTypes';
 /** services_list 中的插件 defId 前缀（ServiceItem: id='plugin-<identifier>'，defId='plugin:<identifier>'） */
 export const PLUGIN_DEF_PREFIX = 'plugin:';
 
+const PLUGIN_SERVICE_PREFIX = 'plugin-';
+
 export function pluginServiceId(identifier: string): string {
-  return 'plugin-' + identifier;
+  return PLUGIN_SERVICE_PREFIX + identifier;
+}
+
+/** ServiceItem id → 插件 identifier（非 'plugin-' 前缀的 id 返回空串） */
+export function pluginIdOfService(serviceId: string): string {
+  return serviceId.startsWith(PLUGIN_SERVICE_PREFIX)
+    ? serviceId.substring(PLUGIN_SERVICE_PREFIX.length) : '';
 }
 
 export function identifierOfDef(defId: string): string {
