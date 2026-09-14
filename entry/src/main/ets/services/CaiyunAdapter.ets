@@ -4,7 +4,8 @@ import {
   LangCode,
   TranslationRequest,
   TranslationResult,
-  TranslateError
+  TranslateError,
+  CORE_LANGS,
 } from '../models/TranslationTypes';
 import { postJson, truncate } from '../utils/HttpClient';
 import { safeParse, getStr, getStrArr } from '../utils/JsonUtil';
@@ -38,7 +39,7 @@ export class CaiyunAdapter implements TranslatorAdapter {
   }
 
   supportedLangs(): LangCode[] {
-    return ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'ru', 'es', 'th', 'vi'];
+    return CORE_LANGS;
   }
 
   /** 彩云语言代码：zh / en / ja / ko / fr / de（de→de）与内部一致，无额外映射 */

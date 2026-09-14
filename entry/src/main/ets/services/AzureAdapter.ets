@@ -4,7 +4,8 @@ import {
   LangCode,
   TranslationRequest,
   TranslationResult,
-  TranslateError
+  TranslateError,
+  CORE_LANGS,
 } from '../models/TranslationTypes';
 import { postJson, truncate } from '../utils/HttpClient';
 import { safeParse, safeParseArray, getStr, getArr, getObj } from '../utils/JsonUtil';
@@ -47,7 +48,7 @@ export class AzureAdapter implements TranslatorAdapter {
   }
 
   supportedLangs(): LangCode[] {
-    return ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'ru', 'es', 'th', 'vi'];
+    return CORE_LANGS;
   }
 
   async translate(req: TranslationRequest): Promise<TranslationResult> {

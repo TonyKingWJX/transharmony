@@ -4,7 +4,8 @@ import {
   LangCode,
   TranslationRequest,
   TranslationResult,
-  TranslateError
+  TranslateError,
+  CORE_LANGS,
 } from '../models/TranslationTypes';
 import { postJson, truncate } from '../utils/HttpClient';
 import { safeParse, getNum, getStr, getStrArr } from '../utils/JsonUtil';
@@ -30,7 +31,7 @@ export class YoudaoAdapter implements TranslatorAdapter {
   private readonly inputLimit = 1000;
 
   supportedLangs(): LangCode[] {
-    return ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'ru', 'es', 'th', 'vi'];
+    return CORE_LANGS;
   }
 
   async translate(req: TranslationRequest): Promise<TranslationResult> {

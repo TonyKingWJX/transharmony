@@ -6,32 +6,42 @@ import { settingsStore, ServiceItem } from './SettingsStore';
 import { historyStore, NewHistoryItem } from './HistoryStore';
 import { TranslateUseCase } from './TranslateUseCase';
 import { devLogStore } from './DevLogStore';
-import { TransImageStore, ImageFileData } from '../utils/TransImageStore';
+import { TransImageStore } from '../utils/TransImageStore';
+import { PluginInstaller, PluginBackup } from './plugin/PluginInstaller';
+import { bobPluginEngine } from './plugin/BobPluginEngine';
 import { PILL_VERSION_KEY } from '../components/EngineSelector';
 
 /**
  * 本地备份与恢复：
- * - 备份内容：全部历史记录（含回收站）+ 服务商配置（含密钥）+ 偏好设置，打包 JSON 后
- *   以「用户密码 PBKDF2 派生 AES-256-GCM 密钥」整包加密。
- * - 图片翻译的原图可选携带（调用方传入 includeImages，勾选项在备份密码弹窗）：
- *   collectForBackup 只收集被历史记录引用的沙箱副本。
+ * - 备份内容：全部历史记录（含回收站）+ 服务商配置（含密钥）+ 偏好设置 + 可选的已安装插件
+ *   （文件/凭证/选项，见 PluginInstaller.collectForBackup），打包 JSON 后以 AES-256-GCM 整包加密。
+ * - 密码可选（v2）：THBK2 头 flags 标记是否密码加密；有密码 PBKDF2 派生密钥，无密码用固定
+ *   应用常量派生（格式统一、仅保完整性，等效明文，UI 弹窗已醒目警示）。
+ * - 兼容：THBK1（v1，必密码）旧备份文件可正常恢复。
  * - 备份位置：系统 DOWNLOAD 模式自动创建的 Download/<包名>/ 目录（免选择界面、
  *   免权限、返回 URI 自带持久化权限）。文件名：鸿译备份_时间.htrans。
- * - 恢复：DocumentViewPicker 拉起系统文件管理器选文件（临时读权限），输入密码解密，
- *   历史可选「合并（按 原文+译文+时间 去重）/覆盖」，服务商与偏好整体替换；
- *   覆盖模式先清空沙箱图片目录再回写备份携带的图片。
+ * - 恢复：DocumentViewPicker 拉起系统文件管理器选文件；无密码文件免输密码，有密码文件输入
+ *   密码解密，历史可选「合并（按 原文+译文+时间 去重）/覆盖」，服务商与偏好整体替换，
+ *   插件先于服务恢复（ServiceItem 引用插件记录）。
  *
- * 安全说明：官方文档注明 DOWNLOAD 目录无访问隔离，故凭证明文不可落盘——
- * 本文件整体加密（AES-GCM 认证加密），无密码不可还原。
+ * 安全说明：官方文档注明 DOWNLOAD 目录无访问隔离——有密码时凭 AES-GCM 认证加密保护；
+ * 无密码备份为用户主动选择（弹窗警示不外传），内容等效明文。
  */
 
-/** 文件头魔数 "THBK1"（TransHarmony Backup v1） */
-const MAGIC: Uint8Array = new Uint8Array([0x54, 0x48, 0x42, 0x4b, 0x31]);
+/** 文件头魔数 "THBK1"（TransHarmony Backup v1：必密码） */
+const MAGIC_V1: Uint8Array = new Uint8Array([0x54, 0x48, 0x42, 0x4b, 0x31]);
+/** 文件头魔数 "THBK2"（TransHarmony Backup v2：flags 标记是否密码加密） */
+const MAGIC_V2: Uint8Array = new Uint8Array([0x54, 0x48, 0x42, 0x4b, 0x32]);
 const SALT_LEN = 16;
 const IV_LEN = 12;
 const TAG_LEN = 16;
 const PBKDF2_ITERATIONS = 60000;
-const HEADER_LEN = MAGIC.length + SALT_LEN + IV_LEN;
+const HEADER_V1_LEN = MAGIC_V1.length + SALT_LEN + IV_LEN;
+/** v2 头：magic(5) + flags(1) + salt + iv */
+const HEADER_V2_LEN = MAGIC_V2.length + 1 + SALT_LEN + IV_LEN;
+const FLAG_HAS_PASSWORD = 0x01;
+/** 无密码备份的派生口令（固定常量：仅统一格式与完整性校验，等效明文） */
+const NO_PASSWORD_SECRET = 'transharmony.nopwd.v2';
 
 /** 备份 JSON 结构（ArkTS 显式接口） */
 interface BackupHistoryRow {
@@ -66,8 +76,18 @@ export interface BackupPayload {
   history: BackupHistoryRow[];
   services: ServiceItem[];
   prefs: BackupPrefs;
-  /** 图片翻译原图（可选携带；恢复时写回沙箱） */
-  images: ImageFileData[];
+  /** v2：已安装插件（可选携带，勾选「包含已安装插件」时存在）；v1 旧备份无此字段 */
+  plugins?: PluginBackup[];
+}
+
+/** 备份头信息（选文件后判定是否需要输密码） */
+export interface BackupHeaderInfo {
+  /** 魔数可识别（THBK1/THBK2） */
+  valid: boolean;
+  /** 格式版本（1=旧必密码格式；2=v2） */
+  version: number;
+  /** 是否需要密码解密（THBK1 恒需要；THBK2 按 flags） */
+  hasPassword: boolean;
 }
 
 /** 恢复结果摘要（UI toast 用） */
@@ -75,6 +95,7 @@ export interface RestoreSummary {
   historyAdded: number;
   historyReplaced: boolean;
   serviceCount: number;
+  pluginCount: number;
 }
 
 function pad2(n: number): string {
@@ -124,15 +145,22 @@ export class BackupService {
     };
   }
 
-  /** 加密 JSON 明文 → THBK1|salt|iv|cipher|tag 单文件字节流 */
-  private static async encryptPayload(json: string, password: string): Promise<Uint8Array> {
+  /** 备份口令 → PBKDF2 派生输入：有密码用密码，无密码用固定常量（仅格式/完整性统一） */
+  private static kdfPassword(password: string, hasPassword: boolean): string {
+    return hasPassword && password.length > 0 ? password : NO_PASSWORD_SECRET;
+  }
+
+  /** 加密 JSON 明文 → THBK2|flags|salt|iv|cipher|tag 单文件字节流（v2 格式，恒走此路径） */
+  private static async encryptPayload(json: string, password: string, hasPassword: boolean): Promise<Uint8Array> {
     const salt = BackupService.random(SALT_LEN);
     const iv = BackupService.random(IV_LEN);
-    const header = new Uint8Array(HEADER_LEN);
-    header.set(MAGIC, 0);
-    header.set(salt, MAGIC.length);
-    header.set(iv, MAGIC.length + SALT_LEN);
-    const key = await BackupService.toSymKey(await BackupService.deriveKey(password, salt));
+    const header = new Uint8Array(HEADER_V2_LEN);
+    header.set(MAGIC_V2, 0);
+    header[MAGIC_V2.length] = hasPassword ? FLAG_HAS_PASSWORD : 0;
+    header.set(salt, MAGIC_V2.length + 1);
+    header.set(iv, MAGIC_V2.length + 1 + SALT_LEN);
+    const kdfPwd = BackupService.kdfPassword(password, hasPassword);
+    const key = await BackupService.toSymKey(await BackupService.deriveKey(kdfPwd, salt));
     const params = BackupService.gcmParams(iv, header, new Uint8Array(TAG_LEN));
     const cipher = cryptoFramework.createCipher('AES256|GCM');
     await cipher.init(cryptoFramework.CryptoMode.ENCRYPT_MODE, key, params);
@@ -148,21 +176,67 @@ export class BackupService {
     return out;
   }
 
-  /** 解密文件字节流 → JSON 明文（密码错误/文件损坏时抛错） */
+  /** 识别备份头（选文件后 UI 据此决定是否弹密码框）；魔数不符返回 valid=false */
+  static peekHeader(bytes: Uint8Array): BackupHeaderInfo {
+    const matches = (m: Uint8Array): boolean => {
+      if (bytes.length < m.length) {
+        return false;
+      }
+      for (let i = 0; i < m.length; i++) {
+        if (bytes[i] !== m[i]) {
+          return false;
+        }
+      }
+      return true;
+    };
+    if (matches(MAGIC_V2)) {
+      if (bytes.length < HEADER_V2_LEN) {
+        return { valid: false, version: 2, hasPassword: false };
+      }
+      return { valid: true, version: 2, hasPassword: (bytes[MAGIC_V2.length] & FLAG_HAS_PASSWORD) !== 0 };
+    }
+    if (matches(MAGIC_V1)) {
+      return { valid: true, version: 1, hasPassword: true };
+    }
+    return { valid: false, version: 0, hasPassword: false };
+  }
+
+  /** 解密文件字节流 → JSON 明文（THBK1/THBK2 自适应；密码错误/文件损坏时抛错） */
   private static async decryptPayload(bytes: Uint8Array, password: string): Promise<BackupPayload> {
-    if (bytes.length <= HEADER_LEN + TAG_LEN) {
+    const head = BackupService.peekHeader(bytes);
+    if (!head.valid) {
+      throw new Error('不是鸿译备份文件');
+    }
+    if (head.version === 2) {
+      if (bytes.length <= HEADER_V2_LEN + TAG_LEN) {
+        throw new Error('备份文件已损坏');
+      }
+      const header = bytes.slice(0, HEADER_V2_LEN);
+      const salt = bytes.slice(MAGIC_V2.length + 1, MAGIC_V2.length + 1 + SALT_LEN);
+      const iv = bytes.slice(MAGIC_V2.length + 1 + SALT_LEN, HEADER_V2_LEN);
+      const tag = bytes.slice(bytes.length - TAG_LEN);
+      const ct = bytes.slice(HEADER_V2_LEN, bytes.length - TAG_LEN);
+      const kdfPwd = BackupService.kdfPassword(password, head.hasPassword);
+      const key = await BackupService.toSymKey(await BackupService.deriveKey(kdfPwd, salt));
+      const params = BackupService.gcmParams(iv, header, tag);
+      const decoder = cryptoFramework.createCipher('AES256|GCM');
+      await decoder.init(cryptoFramework.CryptoMode.DECRYPT_MODE, key, params);
+      const plain = await decoder.update({ data: ct } as cryptoFramework.DataBlob);
+      await decoder.doFinal(null); // 认证失败在此抛 17630001（密码错误/篡改）
+      if (plain === null || plain === undefined) {
+        throw new Error('密码错误或备份文件已损坏');
+      }
+      return JSON.parse(util.TextDecoder.create('utf-8').decodeToString(plain.data)) as BackupPayload;
+    }
+    // THBK1（v1 旧格式）：必密码，头 33 字节
+    if (bytes.length <= HEADER_V1_LEN + TAG_LEN) {
       throw new Error('备份文件已损坏');
     }
-    for (let i = 0; i < MAGIC.length; i++) {
-      if (bytes[i] !== MAGIC[i]) {
-        throw new Error('不是鸿译备份文件');
-      }
-    }
-    const header = bytes.slice(0, HEADER_LEN);
-    const salt = bytes.slice(MAGIC.length, MAGIC.length + SALT_LEN);
-    const iv = bytes.slice(MAGIC.length + SALT_LEN, HEADER_LEN);
+    const header = bytes.slice(0, HEADER_V1_LEN);
+    const salt = bytes.slice(MAGIC_V1.length, MAGIC_V1.length + SALT_LEN);
+    const iv = bytes.slice(MAGIC_V1.length + SALT_LEN, HEADER_V1_LEN);
     const tag = bytes.slice(bytes.length - TAG_LEN);
-    const ct = bytes.slice(HEADER_LEN, bytes.length - TAG_LEN);
+    const ct = bytes.slice(HEADER_V1_LEN, bytes.length - TAG_LEN);
     const key = await BackupService.toSymKey(await BackupService.deriveKey(password, salt));
     const params = BackupService.gcmParams(iv, header, tag);
     const decoder = cryptoFramework.createCipher('AES256|GCM');
@@ -179,20 +253,20 @@ export class BackupService {
 
   /**
    * 立即备份：收集数据 → 加密 → 写 Download/<包名>/。
-   * includeImages=true 时携带图片翻译原图。
+   * password 可空（空 = 不加密，仅完整性校验）；includePlugins=true 携带已安装插件。
    * 返回备份文件名；用户取消（picker 返回空）返回空串。
    */
   /** 立即备份（失败采集日志） */
-  static async backup(ctx: common.UIAbilityContext, password: string, includeImages: boolean): Promise<string> {
+  static async backup(ctx: common.UIAbilityContext, password: string, includePlugins: boolean): Promise<string> {
     try {
-      return await BackupService.doBackup(ctx, password, includeImages);
+      return await BackupService.doBackup(ctx, password, includePlugins);
     } catch (e) {
       devLogStore.append('error', 'backup', '备份失败：' + ((e instanceof Error) ? e.message : String(e)));
       throw e instanceof Error ? e : new Error(String(e));
     }
   }
 
-  private static async doBackup(ctx: common.UIAbilityContext, password: string, includeImages: boolean): Promise<string> {
+  private static async doBackup(ctx: common.UIAbilityContext, password: string, includePlugins: boolean): Promise<string> {
     const history = await historyStore.getAll();
     const rows: BackupHistoryRow[] = [];
     for (const h of history) {
@@ -210,7 +284,7 @@ export class BackupService {
     }
     const now = Date.now();
     const payload: BackupPayload = {
-      version: 1,
+      version: 2,
       app: 'transharmony',
       exportedAt: now,
       history: rows,
@@ -225,10 +299,12 @@ export class BackupService {
         builtinEnabled: settingsStore.getBuiltinEnabled(),
         builtinOrder: settingsStore.getBuiltinOrder(),
         engineChipOrder: settingsStore.getEngineChipOrder()
-      },
-      images: includeImages ? await TransImageStore.collectForBackup(ctx) : []
+      }
     };
-    const bytes = await BackupService.encryptPayload(JSON.stringify(payload), password);
+    if (includePlugins) {
+      payload.plugins = await PluginInstaller.collectAllForBackup(ctx);
+    }
+    const bytes = await BackupService.encryptPayload(JSON.stringify(payload), password, password.length > 0);
     // DOWNLOAD 模式：直达 Download/<包名>/，返回目录 URI（持久化权限）
     const saveOpts = new picker.DocumentSaveOptions();
     saveOpts.pickerMode = picker.DocumentPickerMode.DOWNLOAD;
@@ -300,8 +376,8 @@ export class BackupService {
     let text = '备份时间 ' + d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate())
       + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes())
       + ' · 历史 ' + payload.history.length + ' 条 · 服务商 ' + payload.services.length + ' 个';
-    if (payload.images.length > 0) {
-      text += ' · 图片 ' + payload.images.length + ' 张';
+    if (payload.plugins !== undefined && payload.plugins.length > 0) {
+      text += ' · 插件 ' + payload.plugins.length + ' 个';
     }
     return text;
   }
@@ -321,6 +397,21 @@ export class BackupService {
   }
 
   private static async doApply(payload: BackupPayload, historyReplace: boolean, ctx: common.Context): Promise<RestoreSummary> {
+    // 插件：先于服务恢复（payload.services 的插件条目引用插件登记记录）
+    let pluginCount = 0;
+    if (payload.plugins !== undefined && payload.plugins.length > 0) {
+      const uiCtx = ctx as common.UIAbilityContext;
+      try {
+        for (const item of payload.plugins) {
+          const rec = await PluginInstaller.restorePlugin(uiCtx, item);
+          bobPluginEngine.registerRecord(rec);
+          pluginCount++;
+        }
+      } catch (e) {
+        devLogStore.append('error', 'backup', '恢复失败于插件阶段：' + ((e instanceof Error) ? e.message : String(e)));
+        throw new Error('插件恢复阶段：' + ((e instanceof Error) ? e.message : String(e)));
+      }
+    }
     let rows: NewHistoryItem[] = [];
     for (const r of payload.history) {
       rows.push({
@@ -335,42 +426,49 @@ export class BackupService {
         meta: r.meta
       });
     }
-    if (!historyReplace) {
-      // 合并：按 原文+译文+时间 去重
-      const existing = await historyStore.getAll();
-      const keys = new Set<string>();
-      for (const it of existing) {
-        keys.add(it.source + '\u0001' + it.result + '\u0001' + it.createdAt);
+    try {
+      if (!historyReplace) {
+        // 合并：按 原文+译文+时间 去重
+        const existing = await historyStore.getAll();
+        const keys = new Set<string>();
+        for (const it of existing) {
+          keys.add(it.source + '\u0001' + it.result + '\u0001' + it.createdAt);
+        }
+        rows = rows.filter((r: NewHistoryItem): boolean =>
+          !keys.has(r.source + '\u0001' + r.result + '\u0001' + r.createdAt));
       }
-      rows = rows.filter((r: NewHistoryItem): boolean =>
-        !keys.has(r.source + '\u0001' + r.result + '\u0001' + r.createdAt));
-    }
-    await historyStore.restoreAll(rows, historyReplace);
+      await historyStore.restoreAll(rows, historyReplace);
 
-    // 图片：覆盖模式先清空沙箱图片目录，再把备份携带的图片写回，最后清孤儿
-    if (historyReplace) {
-      TransImageStore.clearAll(ctx);
+      // 图片不再随备份携带（v2 起）：仅清理孤儿文件；
+      // 本机恢复时仍被历史 meta.imgPath 引用的旧原图保留，详情页可继续显示
+      await TransImageStore.cleanOrphans(ctx);
+    } catch (e) {
+      devLogStore.append('error', 'backup', '恢复失败于历史阶段：' + ((e instanceof Error) ? e.message : String(e)));
+      throw new Error('历史恢复阶段：' + ((e instanceof Error) ? e.message : String(e)));
     }
-    TransImageStore.writeAll(ctx, payload.images);
-    await TransImageStore.cleanOrphans(ctx);
 
-    // 服务商与偏好整体替换
-    await settingsStore.setServices(payload.services);
-    const p = payload.prefs;
-    await settingsStore.setEngineId(p.engineId);
-    await settingsStore.setColorModePref(p.colorMode);
-    await settingsStore.setFromLang(p.fromLang);
-    await settingsStore.setToLang(p.toLang);
-    await settingsStore.setOcrSaveToGallery(p.ocrSaveGallery);
-    await settingsStore.setBuiltinAdded(p.builtinAdded);
-    await settingsStore.setBuiltinEnabled(p.builtinEnabled);
-    await settingsStore.setBuiltinOrder(p.builtinOrder);
-    await settingsStore.setEngineChipOrder(p.engineChipOrder);
+    try {
+      // 服务商与偏好整体替换
+      await settingsStore.setServices(payload.services);
+      const p = payload.prefs;
+      await settingsStore.setEngineId(p.engineId);
+      await settingsStore.setColorModePref(p.colorMode);
+      await settingsStore.setFromLang(p.fromLang);
+      await settingsStore.setToLang(p.toLang);
+      await settingsStore.setOcrSaveToGallery(p.ocrSaveGallery);
+      await settingsStore.setBuiltinAdded(p.builtinAdded);
+      await settingsStore.setBuiltinEnabled(p.builtinEnabled);
+      await settingsStore.setBuiltinOrder(p.builtinOrder);
+      await settingsStore.setEngineChipOrder(p.engineChipOrder);
+    } catch (e) {
+      devLogStore.append('error', 'backup', '恢复失败于偏好阶段：' + ((e instanceof Error) ? e.message : String(e)));
+      throw new Error('偏好恢复阶段：' + ((e instanceof Error) ? e.message : String(e)));
+    }
     TranslateUseCase.refreshServices();
     AppStorage.setOrCreate(PILL_VERSION_KEY, Date.now());
-    AppStorage.setOrCreate('pref_engine_id', p.engineId);
-    AppStorage.setOrCreate('pref_from_lang', p.fromLang);
-    AppStorage.setOrCreate('pref_to_lang', p.toLang);
-    return { historyAdded: rows.length, historyReplaced: historyReplace, serviceCount: payload.services.length };
+    AppStorage.setOrCreate('pref_engine_id', payload.prefs.engineId);
+    AppStorage.setOrCreate('pref_from_lang', payload.prefs.fromLang);
+    AppStorage.setOrCreate('pref_to_lang', payload.prefs.toLang);
+    return { historyAdded: rows.length, historyReplaced: historyReplace, serviceCount: payload.services.length, pluginCount: pluginCount };
   }
 }

@@ -12,3 +12,8 @@ oh_modules/
 **/.preview/
 /.appanalyzer/
 .DS_Store
+
+# 本地第三方调试插件与构建缓存（不入库）
+tools/bobplug/
+.cache/
+**/.hvigor/

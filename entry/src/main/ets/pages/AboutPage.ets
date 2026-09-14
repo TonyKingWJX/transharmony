@@ -15,7 +15,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { settingsStore } from '../services/SettingsStore';
 import { devLogStore } from '../services/DevLogStore';
 
-export const APP_VERSION: string = 'v1.0.2';
+export const APP_VERSION: string = 'v1.0.3';
 
 /** 开发者/运营者名称：须与 AppGallery Connect 上提交的开发者名称保持一致（审核要求） */
 export const DEVELOPER_NAME: string = '鸿译开发团队';
@@ -31,9 +31,19 @@ interface UpdateEntry {
 
 const UPDATE_LOG: UpdateEntry[] = [
   {
+    version: 'v1.0.3',
+    date: '2026-09-14',
+    current: true,
+    items: [
+      '新增语言：内置印尼语、德顿语；语言选择器支持插件声明的扩展语言（粤语、文言文等）',
+      '新增插件备份：备份可选携带已安装插件（含配置与密钥），换机恢复免重新导入',
+      '备份密码改为可选：不设密码即可快速备份，恢复时自动识别、免输密码'
+    ]
+  },
+  {
     version: 'v1.0.2',
     date: '2026-09-13',
-    current: true,
+    current: false,
     items: [
       '新增 manggo 插件支持：导入 .mplugin 即装即用，翻译 / 文字识别 OCR / 语音 TTS 全覆盖',
       '多服务插件：一个插件包含多个服务（如多个翻译引擎、翻译+OCR），配置页统一勾选启用、逐服务独立配置',

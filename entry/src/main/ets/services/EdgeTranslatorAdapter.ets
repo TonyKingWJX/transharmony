@@ -4,7 +4,8 @@ import {
   LangCode,
   TranslationRequest,
   TranslationResult,
-  TranslateError
+  TranslateError,
+  CORE_LANGS,
 } from '../models/TranslationTypes';
 import { getJson, postJson, truncate } from '../utils/HttpClient';
 import { safeParse, safeParseArray, getStr, getArr, getObj } from '../utils/JsonUtil';
@@ -44,7 +45,7 @@ export class EdgeTranslatorAdapter implements TranslatorAdapter {
   private tokenFetchedAt: number = 0;
 
   supportedLangs(): LangCode[] {
-    return ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'ru', 'es', 'th', 'vi'];
+    return CORE_LANGS.concat(['id']);
   }
 
   async translate(req: TranslationRequest): Promise<TranslationResult> {

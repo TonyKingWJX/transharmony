@@ -25,8 +25,11 @@ import {
 import {
   splitServiceRef,
   parseManggoServices,
-  isSupportedManggoService
+  isSupportedManggoService,
+  manggoServiceLangs
 } from './plugin/ManggoTypes';
+import { langCatalog } from './LangCatalog';
+import { LANGUAGE_LIST, LangCode } from '../models/TranslationTypes';
 
 /**
  * 引擎注册表：按「免费通道 + 用户服务列表」动态构建。
@@ -81,6 +84,48 @@ export class EngineRegistry {
     }
     EngineRegistry.adapters = list;
     EngineRegistry.readyFlag = true;
+    EngineRegistry.syncManggoLangs(services);
+  }
+
+  /** manggo 多服务插件声明语言同步进扩展语言表（选择器动态出现；Bob 的运行时语言在 refreshBobLangs 登记）。
+   *  仅统计引擎行勾选（selected !== false）的翻译服务；插件删除/服务全关后从选择器消失。 */
+  private static syncManggoLangs(services: ServiceItem[]): void {
+    const byPlugin: Map<string, LangCode[]> = new Map();
+    const appCodes = LANGUAGE_LIST.map((it): LangCode => it.code);
+    for (const s of services) {
+      if (!s.defId.startsWith(PLUGIN_DEF_PREFIX) || s.defId.indexOf('#') < 0 || s.selected === false) {
+        continue;
+      }
+      const parts = splitServiceRef(identifierOfDef(s.defId));
+      const rec = bobPluginEngine.record(parts.pluginId);
+      if (rec === undefined || rec.source !== 'manggo') {
+        continue;
+      }
+      const svc = parseManggoServices(rec.infoJson)
+        .find((m): boolean => m.id === parts.serviceId && m.kind === 'translation');
+      if (svc === undefined) {
+        continue;
+      }
+      let extras = byPlugin.get(parts.pluginId);
+      if (extras === undefined) {
+        extras = [];
+        byPlugin.set(parts.pluginId, extras);
+      }
+      for (const c of manggoServiceLangs(svc.languageJson)) {
+        if (!appCodes.includes(c) && !extras.includes(c)) {
+          extras.push(c);
+        }
+      }
+    }
+    const registered: Set<string> = new Set();
+    for (const pluginId of Array.from(byPlugin.keys())) {
+      const extras = byPlugin.get(pluginId);
+      if (extras !== undefined && extras.length > 0) {
+        langCatalog.registerSource('manggo:' + pluginId, extras);
+        registered.add('manggo:' + pluginId);
+      }
+    }
+    langCatalog.prunePrefix('manggo:', registered);
   }
 
   /** 为单个服务实例创建引擎（凭证由 TranslateUseCase 注入） */

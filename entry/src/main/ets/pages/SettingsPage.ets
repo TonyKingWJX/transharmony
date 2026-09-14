@@ -60,25 +60,26 @@ export struct SettingsPageContent {
   @State lastBackupAt: number = 0;
   /** 待恢复的备份文件字节（选文件成功后暂存，输入密码后解密应用） */
   private pendingRestoreBytes: Uint8Array | null = null;
-  /** 备份密码弹窗（含「包含图片」可选项） */
+  /** 备份弹窗（密码可选 + 「包含已安装插件」可选项） */
   backupPwdController: CustomDialogController = new CustomDialogController({
     builder: PasswordDialog({
-      title: '设置备份密码',
+      title: '备份选项',
       confirmText: '开始备份',
-      showImageOption: true,
-      onConfirm: (password: string, includeImages: boolean): void => {
-        this.doBackup(password, includeImages);
+      passwordOptional: true,
+      showPluginOption: true,
+      onConfirm: (password: string, includePlugins: boolean): void => {
+        this.doBackup(password, includePlugins);
       }
     }),
     customStyle: true,
     alignment: DialogAlignment.Center
   });
-  /** 恢复密码弹窗（选文件成功后弹出） */
+  /** 恢复密码弹窗（仅有密码的备份文件会弹出；无密码文件直接解密） */
   restorePwdController: CustomDialogController = new CustomDialogController({
     builder: PasswordDialog({
       title: '输入备份密码',
       confirmText: '解密恢复',
-      onConfirm: (password: string, _includeImages: boolean): void => {
+      onConfirm: (password: string, _includePlugins: boolean): void => {
         this.doRestoreDecrypt(password);
       }
     }),
@@ -308,15 +309,15 @@ export struct SettingsPageContent {
     this.backupPwdController.open();
   }
 
-  /** 弹窗收集密码后：收集数据 → 加密 → 写 Download/<包名>/（可选携带图片） */
-  private async doBackup(password: string, includeImages: boolean): Promise<void> {
-    if (this.backupBusy || password.length < 4) {
+  /** 弹窗收集密码/插件勾选后：收集数据 → 加密 → 写 Download/<包名>/ */
+  private async doBackup(password: string, includePlugins: boolean): Promise<void> {
+    if (this.backupBusy || (password.length > 0 && password.length < 4)) {
       return;
     }
     this.backupBusy = true;
     try {
       const ctx = getContext(this) as common.UIAbilityContext;
-      const fileName = await BackupService.backup(ctx, password, includeImages);
+      const fileName = await BackupService.backup(ctx, password, includePlugins);
       if (fileName.length === 0) {
         return; // 用户取消
       }
@@ -329,7 +330,7 @@ export struct SettingsPageContent {
     }
   }
 
-  /** 先拉系统文件管理器选 .htrans 文件，成功后弹密码框 */
+  /** 先拉系统文件管理器选 .htrans 文件；无密码备份直接解密，有密码弹密码框 */
   private async openRestore(): Promise<void> {
     if (this.backupBusy) {
       return;
@@ -341,6 +342,11 @@ export struct SettingsPageContent {
         return; // 用户取消
       }
       this.pendingRestoreBytes = bytes;
+      const head = BackupService.peekHeader(bytes);
+      if (head.valid && !head.hasPassword) {
+        await this.doRestoreDecrypt('');
+        return;
+      }
       this.restorePwdController.open();
     } catch (e) {
       this.toast('读取备份文件失败：' + this.errText(e));
@@ -396,7 +402,11 @@ export struct SettingsPageContent {
       const hist = summary.historyReplaced
         ? '已覆盖恢复 ' + summary.historyAdded + ' 条历史'
         : '已合并 ' + summary.historyAdded + ' 条历史';
-      this.toast(hist + ' · 服务商 ' + summary.serviceCount + ' 个');
+      let msg = hist + ' · 服务商 ' + summary.serviceCount + ' 个';
+      if (summary.pluginCount > 0) {
+        msg += ' · 插件 ' + summary.pluginCount + ' 个';
+      }
+      this.toast(msg);
     } catch (e) {
       this.toast('恢复失败：' + this.errText(e));
     } finally {
@@ -685,7 +695,7 @@ export struct SettingsPageContent {
                 Text('立即备份')
                   .fontSize(15)
                   .fontColor($r('app.color.font_primary'))
-                Text('历史与服务商配置（密码加密）导出到 Download/鸿译 目录')
+                Text('历史与服务商配置（密码可选，可含插件）导出到 Download/鸿译 目录')
                   .fontSize(11)
                   .fontColor($r('app.color.font_tertiary'))
               }

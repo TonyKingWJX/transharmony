@@ -2,6 +2,7 @@ import { fileIo } from '@kit.CoreFileKit';
 import zlib from '@ohos.zlib';
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
+import { util } from '@kit.ArkTS';
 import { AssetVault } from '../AssetVault';
 import { devLogStore } from '../DevLogStore';
 import pluginHost from 'libpluginhost.so';
@@ -588,4 +589,182 @@ export class PluginInstaller {
       // 目录不存在等场景忽略
     }
   }
+
+  // ---- 备份与恢复（应用内加密备份携带插件） ----
+
+  /** 递归收集目录下全部文件的相对路径（'' 起步） */
+  private static listFilesRecursive(root: string, rel: string): string[] {
+    const out: string[] = [];
+    const abs = rel === '' ? root : `${root}/${rel}`;
+    for (const name of fileIo.listFileSync(abs)) {
+      const childRel = rel === '' ? name : `${rel}/${name}`;
+      const childAbs = `${root}/${childRel}`;
+      if (fileIo.statSync(childAbs).isDirectory()) {
+        for (const sub of PluginInstaller.listFilesRecursive(root, childRel)) {
+          out.push(sub);
+        }
+      } else {
+        out.push(childRel);
+      }
+    }
+    return out;
+  }
+
+  /** 收集单个插件的备份内容（文件 + secure 凭证 + 非密钥选项）；读取失败直接抛错（调用方中止整次备份） */
+  static async collectForBackup(ctx: common.UIAbilityContext, rec: InstalledPlugin): Promise<PluginBackup> {
+    const b64 = new util.Base64Helper();
+    const files: PluginBackupFile[] = [];
+    for (const rel of PluginInstaller.listFilesRecursive(rec.dir, '')) {
+      const abs = `${rec.dir}/${rel}`;
+      const stat = fileIo.statSync(abs);
+      const buf = new ArrayBuffer(stat.size);
+      const f = fileIo.openSync(abs, fileIo.OpenMode.READ_ONLY);
+      try {
+        fileIo.readSync(f.fd, buf);
+      } finally {
+        fileIo.closeSync(f);
+      }
+      files.push({ path: rel, dataB64: b64.encodeToStringSync(new Uint8Array(buf)) });
+    }
+    const credentials: PluginBackupCredential[] = [];
+    for (const alias of PluginInstaller.secureAliases(rec)) {
+      const value = AssetVault.read(alias);
+      if (value !== '') {
+        credentials.push({ alias: alias, value: value });
+      }
+    }
+    const options: PluginBackupOption[] = [];
+    const store = await preferences.getPreferences(ctx, PREF_STORE);
+    const all = await store.getAll() as Record<string, Object>;
+    const prefix = `cfg_${rec.pluginId}_`;
+    for (const key of Object.keys(all)) {
+      const v = all[key];
+      if (key.startsWith(prefix) && typeof v === 'string') {
+        options.push({ key: key, value: v as string });
+      }
+    }
+    return {
+      pluginId: rec.pluginId,
+      name: rec.name,
+      version: rec.version,
+      category: rec.category,
+      source: rec.source,
+      infoJson: rec.infoJson,
+      files: files,
+      credentials: credentials,
+      options: options
+    };
+  }
+
+  /** 收集全部已安装插件的备份内容 */
+  static async collectAllForBackup(ctx: common.UIAbilityContext): Promise<PluginBackup[]> {
+    const list = await PluginInstaller.list(ctx);
+    const out: PluginBackup[] = [];
+    for (const rec of list) {
+      out.push(await PluginInstaller.collectForBackup(ctx, rec));
+    }
+    return out;
+  }
+
+  /** 从备份恢复单个插件：文件直写落盘 → 重建登记 → 回写凭证与选项。
+   *  返回登记记录（registerRecord 由调用方执行，避免本文件与 BobPluginEngine 循环依赖） */
+  static async restorePlugin(ctx: common.UIAbilityContext, item: PluginBackup): Promise<InstalledPlugin> {
+    const destDir = `${ctx.filesDir}/plugins/${item.pluginId}/${item.version}`;
+    try {
+      PluginInstaller.rmDir(destDir);
+      fileIo.mkdirSync(destDir, true);
+    } catch (e) {
+      const be = e as BusinessError;
+      throw new Error(`插件目录准备失败 ${destDir}: ${be.code ?? ''} ${be.message ?? String(e)}`);
+    }
+    const b64 = new util.Base64Helper();
+    for (const f of item.files) {
+      const abs = `${destDir}/${f.path}`;
+      const idx = f.path.lastIndexOf('/');
+      try {
+        if (idx > 0) {
+          // 注意：截取父目录必须用相对路径 f.path，而非 abs（否则会落到沙箱根目录触发 EACCES）
+          fileIo.mkdirSync(`${destDir}/${f.path.substring(0, idx)}`, true);
+        }
+        const u8 = b64.decodeSync(f.dataB64);
+        const out = fileIo.openSync(abs,
+          fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+        try {
+          const data = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+          fileIo.writeSync(out.fd, data);
+        } finally {
+          fileIo.closeSync(out);
+        }
+      } catch (e) {
+        const be = e as BusinessError;
+        throw new Error(`插件文件写入失败 ${f.path}: ${be.code ?? ''} ${be.message ?? String(e)}`);
+      }
+    }
+    const rec: InstalledPlugin = {
+      pluginId: item.pluginId,
+      name: item.name,
+      version: item.version,
+      category: item.category,
+      source: item.source,
+      dir: destDir,
+      mainPath: `${destDir}/main.js`,
+      infoJson: item.infoJson
+    };
+    const list = await PluginInstaller.list(ctx);
+    const i = list.findIndex(p => p.pluginId === rec.pluginId);
+    if (i >= 0) {
+      list[i] = rec;
+    } else {
+      list.push(rec);
+    }
+    await PluginInstaller.saveList(ctx, list);
+    for (const c of item.credentials) {
+      try {
+        await AssetVault.write(c.alias, c.value);
+      } catch (e) {
+        // 单个凭证回写失败不阻塞整体恢复（用户可到插件配置页重填）
+      }
+    }
+    if (item.options.length > 0) {
+      const store = await preferences.getPreferences(ctx, PREF_STORE);
+      for (const o of item.options) {
+        await store.put(o.key, o.value);
+      }
+      await store.flush();
+    }
+    devLogStore.append('info', 'plugin', `插件恢复：${item.name} v${item.version} (${item.pluginId})`);
+    return rec;
+  }
+}
+
+/** 插件备份：单文件条目（相对 rec.dir 路径 + base64 内容） */
+export interface PluginBackupFile {
+  path: string;
+  dataB64: string;
+}
+
+/** 插件备份：secure 选项凭证（ASSET 别名 → 明文；由备份整包加密保护） */
+export interface PluginBackupCredential {
+  alias: string;
+  value: string;
+}
+
+/** 插件备份：非密钥选项（cfg_<pluginId>_ 前缀 Preferences 键值） */
+export interface PluginBackupOption {
+  key: string;
+  value: string;
+}
+
+/** 插件备份条目（BackupPayload.plugins 元素） */
+export interface PluginBackup {
+  pluginId: string;
+  name: string;
+  version: string;
+  category: string;
+  source: string;
+  /** 清单原文（info.json / manggo.plugin.json） */
+  infoJson: string;
+  files: PluginBackupFile[];
+  credentials: PluginBackupCredential[];
+  options: PluginBackupOption[];
 }

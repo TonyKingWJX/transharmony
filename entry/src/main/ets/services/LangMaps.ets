@@ -83,7 +83,9 @@ export function aiLangName(code: string): string {
     'ru': '俄语',
     'es': '西班牙语',
     'th': '泰语',
-    'vi': '越南语'
+    'vi': '越南语',
+    'id': '印尼语',
+    'tet': '德顿语'
   };
   return map[code] ?? code;
 }

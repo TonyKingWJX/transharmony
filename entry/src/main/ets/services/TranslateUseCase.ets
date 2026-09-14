@@ -331,6 +331,13 @@ export class TranslateUseCase {
       devLogStore.append('error', 'translate', '请求失败：未知翻译服务 ' + engineId);
       return Promise.reject(new Error('未知翻译服务: ' + engineId));
     }
+    // 语言对预检：引擎未声明支持时立即给出明确提示，不发起注定失败的请求
+    if (!TranslateUseCase.supportsPair(adapter.id, from, to)) {
+      const msg = '「' + adapter.label + '」不支持' + langLabel(from) + ' → ' + langLabel(to)
+        + '，请切换引擎（德顿语等小语种可用 AI 引擎或插件）';
+      devLogStore.append('error', 'translate', '请求拦截：' + msg);
+      return Promise.reject(new Error(msg));
+    }
     TranslateUseCase.applyCredentials();
     const req: TranslationRequest = { text: text, from: from, to: to, style: style };
     const startTs = Date.now();
@@ -360,11 +367,9 @@ export class TranslateUseCase {
     return result;
   }
 
-  /** 引擎是否覆盖当前语言对（离线引擎仅中英；其他引擎不做对级过滤，保持既有行为） */
+  /** 引擎是否覆盖当前语言对（全引擎按各自 supportedLangs 过滤：离线仅中英、
+   *  云端核心语言、AI/微软含印尼语/德顿语、插件含其声明语言；from=auto 恒可尝试） */
   static supportsPair(adapterId: string, from: string, to: string): boolean {
-    if (adapterId !== OFFLINE_ENGINE_ID) {
-      return true;
-    }
     const adapter = EngineRegistry.byId(adapterId);
     if (adapter === undefined) {
       return false;
@@ -373,7 +378,7 @@ export class TranslateUseCase {
     if (!langs.includes(to)) {
       return false;
     }
-    // from=auto 时由内核判向（中/英启发式），恒可尝试
+    // from=auto 时由引擎自行判向，恒可尝试
     return from === AUTO_DETECT || langs.includes(from);
   }
 
@@ -385,9 +390,23 @@ export class TranslateUseCase {
     style: TranslateStyle, onUpdate: (items: AggregateItem[]) => void): Promise<void> {
     await TranslateUseCase.guardSensitive(text);
     TranslateUseCase.applyCredentials();
-    // 不覆盖当前语言对的引擎不进并发名单（离线引擎非中英对时静默跳过）
+    // 不覆盖当前语言对的引擎不进并发名单（离线非中英对、云端遇 id/tet、插件声明外语种时静默跳过）
     const runnable = engineIds.filter((id: string): boolean =>
       TranslateUseCase.supportsPair(id, from, to));
+    if (runnable.length === 0) {
+      const msg = '没有支持' + langLabel(from) + ' → ' + langLabel(to) + ' 的引擎，请更换语言组合或切换单引擎';
+      devLogStore.append('error', 'translate', '聚合中止：' + msg);
+      onUpdate([{
+        engineId: '',
+        label: '聚合翻译',
+        isAI: false,
+        status: 'error',
+        text: '',
+        elapsedMs: 0,
+        error: msg
+      }]);
+      return;
+    }
     const aggLabels: string[] = [];
     for (const id of runnable) {
       const ad = EngineRegistry.byId(id);

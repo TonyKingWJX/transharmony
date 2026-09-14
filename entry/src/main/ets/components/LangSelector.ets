@@ -1,30 +1,49 @@
 /**
  * 语言选择条：官方 Select 下拉（源/目标）+ 圆形交换按钮。
  * 源语言含「自动检测」；检测到源语言时在源 Select 下方展示提示。
+ * 语言选项 = 内置 LANGUAGE_LIST + 插件扩展语言（LangCatalog 经 AppStorage 动态发布）。
  */
 
 import { AUTO_DETECT, LangCode, LANGUAGE_LIST, LanguageItem, langLabel } from '../models/TranslationTypes';
-
-/** 源语言选项清单（自动检测 + 全部语言） */
-const FROM_CODES: LangCode[] = [AUTO_DETECT].concat(LANGUAGE_LIST.map((it: LanguageItem): LangCode => it.code));
+import { EXT_LANGS_KEY, parseExtLangs } from '../services/LangCatalog';
 
 @Component
 export struct LangSelector {
   @Link fromLang: LangCode;
   @Link toLang: LangCode;
+  /** 插件扩展语言码数组 JSON（LangCatalog 发布） */
+  @StorageProp(EXT_LANGS_KEY) extLangsJson: string = '[]';
   /** 识别到源语言时展示在源 Select 下方（auto 时） */
   detectedFrom: LangCode = '';
   onPickFrom: (code: LangCode) => void = (code: LangCode): void => {};
   onPickTo: (code: LangCode) => void = (code: LangCode): void => {};
   onSwap: () => void = (): void => {};
 
+  /** 插件扩展语言码（@StorageProp 在 build 内被读取，变更即重建选项） */
+  private extLangs(): LangCode[] {
+    return parseExtLangs(this.extLangsJson);
+  }
+
+  private langItems(): LanguageItem[] {
+    const items: LanguageItem[] = LANGUAGE_LIST.slice();
+    for (const c of this.extLangs()) {
+      items.push({ code: c, label: langLabel(c) });
+    }
+    return items;
+  }
+
+  private fromCodes(): LangCode[] {
+    return [AUTO_DETECT].concat(LANGUAGE_LIST.map((it: LanguageItem): LangCode => it.code))
+      .concat(this.extLangs());
+  }
+
   private fromIndex(): number {
-    const idx = FROM_CODES.indexOf(this.fromLang);
+    const idx = this.fromCodes().indexOf(this.fromLang);
     return idx >= 0 ? idx : 0;
   }
 
   private toIndex(): number {
-    const idx = LANGUAGE_LIST.findIndex((it: LanguageItem): boolean => it.code === this.toLang);
+    const idx = this.langItems().findIndex((it: LanguageItem): boolean => it.code === this.toLang);
     return idx >= 0 ? idx : 0;
   }
 
@@ -41,7 +60,7 @@ export struct LangSelector {
 
   private fromOptions(): SelectOption[] {
     const opts: SelectOption[] = [];
-    for (const code of FROM_CODES) {
+    for (const code of this.fromCodes()) {
       opts.push({ value: code === AUTO_DETECT ? '自动检测' : langLabel(code) });
     }
     return opts;
@@ -49,7 +68,7 @@ export struct LangSelector {
 
   private toOptions(): SelectOption[] {
     const opts: SelectOption[] = [];
-    for (const it of LANGUAGE_LIST) {
+    for (const it of this.langItems()) {
       opts.push({ value: it.label });
     }
     return opts;
@@ -70,8 +89,9 @@ export struct LangSelector {
             .optionFont({ size: 14 })
             .width('100%')
             .onSelect((index: number): void => {
-              if (index >= 0 && index < FROM_CODES.length) {
-                this.onPickFrom(FROM_CODES[index]);
+              const codes = this.fromCodes();
+              if (index >= 0 && index < codes.length) {
+                this.onPickFrom(codes[index]);
               }
             })
         }
@@ -102,8 +122,9 @@ export struct LangSelector {
             .optionFont({ size: 14 })
             .width('100%')
             .onSelect((index: number): void => {
-              if (index >= 0 && index < LANGUAGE_LIST.length) {
-                this.onPickTo(LANGUAGE_LIST[index].code);
+              const items = this.langItems();
+              if (index >= 0 && index < items.length) {
+                this.onPickTo(items[index].code);
               }
             })
         }

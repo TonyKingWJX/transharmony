@@ -10,7 +10,7 @@ import { historyStore } from '../services/HistoryStore';
  *   filesDir/trans_images/，相对路径写入历史记录 meta；页面销毁即焚的是 PixelMap，
  *   沙箱副本随历史记录保留，详情页/回收站恢复期间均可见。
  * - 彻底删除/清空回收站后调用 cleanOrphans 清理无记录引用的文件。
- * - 备份可选携带图片：collectForBackup 只收集被历史记录引用的文件。
+ * - 备份不再携带图片（v2 起）：跨设备恢复时详情页回退 meta 内嵌缩略图展示。
  */
 
 /** 历史记录 meta 中的图片信息（写入/读取 JSON） */
@@ -19,14 +19,6 @@ export interface HistoryImageMeta {
   thumb: string;
   /** 沙箱相对路径 trans_images/xxx.jpg（空串=无原图文件） */
   imgPath: string;
-}
-
-/** 备份用图片文件数据（base64） */
-export interface ImageFileData {
-  /** 沙箱相对路径 */
-  path: string;
-  /** 文件内容 base64 */
-  data: string;
 }
 
 const DIR_NAME = 'trans_images';
@@ -220,70 +212,6 @@ export class TransImageStore {
       }
     } catch (e) {
       // 目录不存在
-    }
-  }
-
-  /** 备份收集：读取被历史记录引用的图片文件，返回 base64 数据（可选携带图片用） */
-  static async collectForBackup(ctx: common.Context): Promise<ImageFileData[]> {
-    const out: ImageFileData[] = [];
-    try {
-      const dir = TransImageStore.dir(ctx);
-      const wanted = new Set<string>();
-      const all = await historyStore.getAll();
-      for (const it of all) {
-        const p = TransImageStore.imgPathFromMeta(it.meta);
-        if (p.length > 0) {
-          wanted.add(p);
-        }
-      }
-      const names = fs.listFileSync(dir);
-      for (const n of names) {
-        const rel = DIR_NAME + '/' + n;
-        if (!wanted.has(rel)) {
-          continue;
-        }
-        try {
-          const file = fs.openSync(TransImageStore.absPath(ctx, rel), fs.OpenMode.READ_ONLY);
-          const size = fs.statSync(TransImageStore.absPath(ctx, rel)).size;
-          const buf = new ArrayBuffer(size);
-          fs.readSync(file.fd, buf);
-          fs.closeSync(file);
-          const data: ImageFileData = {
-            path: rel,
-            data: new util.Base64Helper().encodeToStringSync(new Uint8Array(buf))
-          };
-          out.push(data);
-        } catch (e) {
-          // 单文件读取失败跳过
-        }
-      }
-    } catch (e) {
-      // 目录不存在
-    }
-    return out;
-  }
-
-  /** 备份恢复：把打包的图片写回沙箱（同名覆盖；目录不存在则创建） */
-  static writeAll(ctx: common.Context, images: ImageFileData[]): void {
-    if (images.length === 0 || !TransImageStore.ensureDir(ctx)) {
-      return;
-    }
-    for (const f of images) {
-      if (f.path.length === 0 || f.data.length === 0) {
-        continue;
-      }
-      try {
-        const bytes = new util.Base64Helper().decodeSync(f.data);
-        const file = fs.openSync(TransImageStore.absPath(ctx, f.path),
-          fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
-        try {
-          fs.writeSync(file.fd, bytes.buffer as ArrayBuffer);
-        } finally {
-          fs.closeSync(file);
-        }
-      } catch (e) {
-        // 单文件写回失败跳过
-      }
     }
   }
 }

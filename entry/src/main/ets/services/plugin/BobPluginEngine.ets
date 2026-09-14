@@ -4,13 +4,14 @@ import pluginHost from 'libpluginhost.so';
 import { PluginInstaller, InstalledPlugin } from './PluginInstaller';
 import { settingsStore, ServiceItem } from '../SettingsStore';
 import { LANGUAGE_LIST, LangCode } from '../../models/TranslationTypes';
+import { langCatalog } from '../LangCatalog';
 import { parseManggoServices, isSupportedManggoService, splitServiceRef } from './ManggoTypes';
 
 /**
  * Bob 翻译插件的运行时管理器：
  *  - 启动时预载已安装插件清单（同步可用，供 EngineRegistry 建引擎）；
  *  - 首次翻译时懒加载进 JSVM 运行时（配置 = ServiceItem.config 覆盖 + info.json defaultValue）；
- *  - 语言码映射：Bob（zh-Hans 等）↔ 内部（zh 等），插件支持集与应用 10 语言取交集。
+ *  - 语言码映射：Bob（zh-Hans 等）↔ 内部（zh 等），未内置语言经 LangCatalog 进选择器。
  */
 
 /** services_list 中的插件 defId 前缀（ServiceItem: id='plugin-<identifier>'，defId='plugin:<identifier>'） */
@@ -42,13 +43,12 @@ export function fromBobLang(code: string): LangCode {
   return code === 'zh-Hans' ? 'zh' : code;
 }
 
-/** 插件声明语言（Bob 码）→ 应用支持语言交集（保序） */
+/** 插件声明语言（Bob 码）→ 内部语言码（保序去重；未内置语言原样保留，经 LangCatalog 展示） */
 export function mapBobLangs(bobCodes: string[]): LangCode[] {
-  const appCodes = LANGUAGE_LIST.map((it): LangCode => it.code);
   const out: LangCode[] = [];
   for (const raw of bobCodes) {
     const c = fromBobLang(raw);
-    if (appCodes.includes(c) && !out.includes(c)) {
+    if (!out.includes(c)) {
       out.push(c);
     }
   }
@@ -204,13 +204,18 @@ class BobPluginEngine {
     throw lastErr;
   }
 
-  /** Bob 加载后的语言支持表刷新（尽力而为：失败仅影响交集过滤精度） */
+  /** Bob 加载后的语言支持表刷新（尽力而为：失败仅影响语言支持集精度） */
   private async refreshBobLangs(pluginId: string): Promise<void> {
     try {
       const raw = await pluginHost.callPluginFn(pluginId, 'supportLanguages', '[]', 'sync', 3000);
       const codes = JSON.parse(raw) as string[];
       if (Array.isArray(codes)) {
-        this.langs.set(pluginId, mapBobLangs(codes));
+        const mapped = mapBobLangs(codes);
+        this.langs.set(pluginId, mapped);
+        // 未内置语言登记为扩展语言（选择器动态出现；识别不了的由 LangCatalog 过滤）
+        const appCodes = LANGUAGE_LIST.map((it): LangCode => it.code);
+        langCatalog.registerSource('bob:' + pluginId,
+          mapped.filter((c: LangCode): boolean => !appCodes.includes(c)));
       }
     } catch (e) {
       // 保留全集兜底
@@ -252,6 +257,8 @@ class BobPluginEngine {
     this.everLoaded.delete(pluginId);
     this.records.delete(pluginId);
     this.langs.delete(pluginId);
+    langCatalog.unregisterSource('bob:' + pluginId);
+    langCatalog.unregisterSource('manggo:' + pluginId);
   }
 
   /** 配置变更/重装后标记重载：下次 ensureLoaded 时先销毁旧 Env 再全新加载

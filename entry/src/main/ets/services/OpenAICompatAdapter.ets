@@ -5,7 +5,8 @@ import {
   TranslationResult,
   TranslateError,
   TranslateStyle,
-  langLabel
+  langLabel,
+  CORE_LANGS,
 } from '../models/TranslationTypes';
 import { postJson, postStream, truncate } from '../utils/HttpClient';
 import { safeParse, getStr, getArr, getNum, getObj } from '../utils/JsonUtil';
@@ -72,7 +73,7 @@ export class OpenAICompatAdapter implements TranslatorAdapter {
   }
 
   supportedLangs(): LangCode[] {
-    return ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'ru', 'es', 'th', 'vi'];
+    return CORE_LANGS.concat(['id', 'tet']);
   }
 
   async translate(req: TranslationRequest): Promise<TranslationResult> {

@@ -4,7 +4,8 @@ import {
   LangCode,
   TranslationRequest,
   TranslationResult,
-  TranslateError
+  TranslateError,
+  CORE_LANGS,
 } from '../models/TranslationTypes';
 import { postJson, truncate } from '../utils/HttpClient';
 import { safeParse, getStr } from '../utils/JsonUtil';
@@ -36,7 +37,7 @@ export class NiutransAdapter implements TranslatorAdapter {
   }
 
   supportedLangs(): LangCode[] {
-    return ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'ru', 'es', 'th', 'vi'];
+    return CORE_LANGS;
   }
 
   private static toCode(code: LangCode): string {

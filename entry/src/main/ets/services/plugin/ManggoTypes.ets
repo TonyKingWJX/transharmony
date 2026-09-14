@@ -166,7 +166,9 @@ const APP_TO_MANGGO: Record<string, string> = {
   'ru': 'ru_RU',
   'es': 'es_ES',
   'th': 'th_TH',
-  'vi': 'vi_VN'
+  'vi': 'vi_VN',
+  'id': 'id_ID',
+  'tet': 'tet_TL'
 };
 
 /** 内部语言码 → manggo 码（auto 原样） */

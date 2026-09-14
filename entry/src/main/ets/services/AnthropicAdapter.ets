@@ -3,7 +3,8 @@ import {
   LangCode,
   TranslationRequest,
   TranslationResult,
-  TranslateError
+  TranslateError,
+  CORE_LANGS,
 } from '../models/TranslationTypes';
 import { postJson, postStream, truncate } from '../utils/HttpClient';
 import { safeParse, getObj, getArr, getStr, getNum } from '../utils/JsonUtil';
@@ -67,7 +68,7 @@ export class AnthropicAdapter implements TranslatorAdapter {
   }
 
   supportedLangs(): LangCode[] {
-    return ['zh', 'en', 'ja', 'ko', 'fr', 'de', 'ru', 'es', 'th', 'vi'];
+    return CORE_LANGS.concat(['id', 'tet']);
   }
 
   async translate(req: TranslationRequest): Promise<TranslationResult> {

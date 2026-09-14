@@ -18,12 +18,14 @@ import {
 import {
   AUTO_DETECT,
   AggregateItem,
+  LANGUAGE_LIST,
   LangCode,
   STYLE_OPTIONS,
   StyleOption,
   TranslationResult,
   TranslateStyle
 } from '../models/TranslationTypes';
+import { EXT_LANGS_KEY, parseExtLangs } from '../services/LangCatalog';
 import { EngineRegistry } from '../services/EngineRegistry';
 import { TranslateUseCase } from '../services/TranslateUseCase';
 import { settingsStore } from '../services/SettingsStore';
@@ -70,6 +72,8 @@ export struct TranslatePageContent {
   @StorageProp('ux_navBarH') navBarH: number = 0;
   /** 引擎行版本号：面板开关内置通道等变更后自愈当前选中引擎 */
   @StorageProp('ux_pill_version') @Watch('onPillsChanged') pillVersion: number = 0;
+  /** 插件扩展语言表（JSON）：插件装/卸/勾选后自愈当前语言选择 */
+  @StorageProp(EXT_LANGS_KEY) @Watch('onExtLangsChanged') extLangsJson: string = '[]';
   /** 沉浸式状态栏避让高度（vp）：页内自行避让，保证蒙层边界与避让区重叠 */
   @StorageProp('ux_statusBarH') statusBarH: number = 0;
   /** 窗口宽度（vp）：≥600 判定宽屏（平板/横屏/自由多窗），翻译页切双列 */
@@ -78,6 +82,32 @@ export struct TranslatePageContent {
 
   private toast(msg: string): void {
     this.getUIContext().getPromptAction().showToast({ message: msg });
+  }
+
+  /** 当前语言码是否仍可选（内置或插件扩展表中） */
+  private langSelectable(code: LangCode): boolean {
+    if (LANGUAGE_LIST.some((it): boolean => it.code === code)) {
+      return true;
+    }
+    return parseExtLangs(this.extLangsJson).includes(code);
+  }
+
+  /** 语言选择失效自愈：插件卸载/停用后当前选择不可达时回落默认值 */
+  private sanitizeLangSelection(): void {
+    if (this.fromLang !== AUTO_DETECT && !this.langSelectable(this.fromLang)) {
+      this.fromLang = AUTO_DETECT;
+      AppStorage.setOrCreate('pref_from_lang', this.fromLang);
+    }
+    if (!this.langSelectable(this.toLang)) {
+      this.toLang = 'en';
+      this.toLangTouched = false;
+      AppStorage.setOrCreate('pref_to_lang', this.toLang);
+    }
+  }
+
+  /** 扩展语言表变化回调 */
+  onExtLangsChanged(): void {
+    this.sanitizeLangSelection();
   }
 
   /** 引擎行跨页刷新：任何页 bump 该版本号后引擎 chip 行重算 */
@@ -99,6 +129,7 @@ export struct TranslatePageContent {
     if (savedTo !== undefined && savedTo.length > 0) {
       this.toLang = savedTo;
     }
+    this.sanitizeLangSelection();
     this.ensureEngineUsable();
   }
 
