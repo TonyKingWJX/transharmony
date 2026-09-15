@@ -392,6 +392,50 @@ export const AI_PROVIDERS: ProviderDef[] = [
     allowModel: true
   },
   {
+    id: 'ai-mimo',
+    label: '小米 MiMo',
+    color: '#FF6900',
+    badge: '米',
+    kind: 'ai',
+    isAI: true,
+    aiFormat: 'openai',
+    baseUrl: 'https://api.xiaomimimo.com/v1',
+    defaultModel: 'mimo-v2.5-pro',
+    subtitle: '官方 API · OpenAI 兼容',
+    note: '小米 MiMo 官方 API（MiMo-V2.5 系列），兼容 OpenAI Chat Completions 协议，按 token 计费。在开放平台控制台创建 API Key（sk- 开头）。',
+    fields: [
+      {
+        key: 'apiKey', label: 'API Key', placeholder: 'sk-…', secret: true, optional: false,
+        hint: '在小米 MiMo 开放平台控制台「API Keys」页创建。',
+        link: 'https://platform.xiaomimimo.com/#/console/api-keys', linkText: '前往小米 MiMo 开放平台'
+      }
+    ],
+    allowBaseUrl: true,
+    allowModel: true
+  },
+  {
+    id: 'ai-openai',
+    label: 'OpenAI 官方',
+    color: '#111111',
+    badge: 'O',
+    kind: 'ai',
+    isAI: true,
+    aiFormat: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-5-mini',
+    subtitle: '官方 API · GPT 系列',
+    note: 'OpenAI 官方 API（Chat Completions 协议），按 token 计费。在 platform.openai.com 创建 API Key；配置页可自动获取模型列表后切换。',
+    fields: [
+      {
+        key: 'apiKey', label: 'API Key', placeholder: 'sk-…', secret: true, optional: false,
+        hint: '在 OpenAI 平台「API Keys」页创建。',
+        link: 'https://platform.openai.com/api-keys', linkText: '前往 OpenAI 平台'
+      }
+    ],
+    allowBaseUrl: true,
+    allowModel: true
+  },
+  {
     id: 'ai-anthropic',
     label: 'Claude',
     color: '#D97757',
@@ -424,12 +468,12 @@ export const AI_PROVIDERS: ProviderDef[] = [
     baseUrl: '',
     defaultModel: '',
     subtitle: '自定义 API 地址 · OpenAI 协议',
-    note: '任何兼容 OpenAI Chat Completions 协议的服务：OpenAI 官方、Ollama 本地模型、OpenRouter、硅基流动、各类中转站等。API 地址填写到 /v1 这一级（应用自动拼接 /chat/completions）。',
+    note: '任何兼容 OpenAI Chat Completions 协议的服务：Ollama 本地模型、OpenRouter、硅基流动、各类中转站等。API 地址填写到 /v1 这一级（应用自动拼接 /chat/completions）。',
     fields: [
       {
         key: 'apiKey', label: 'API Key', placeholder: 'sk-…（本地服务可留空）', secret: true, optional: true,
-        hint: '服务提供方后台创建；OpenAI 官方在 platform.openai.com 获取。',
-        link: 'https://platform.openai.com/api-keys', linkText: 'OpenAI 官方 Key 获取'
+        hint: '在服务提供方的后台创建；如需 OpenAI 官方，请添加「OpenAI 官方」预置。',
+        link: '', linkText: ''
       },
       {
         key: 'baseUrl', label: 'API 地址', placeholder: 'https://api.example.com/v1', secret: false, optional: false,
@@ -455,8 +499,8 @@ export const AI_PROVIDERS: ProviderDef[] = [
     fields: [
       {
         key: 'apiKey', label: 'API Key', placeholder: 'sk-ant-…', secret: true, optional: false,
-        hint: '服务提供方后台创建；Anthropic 官方在 console.anthropic.com 获取。',
-        link: 'https://console.anthropic.com/settings/keys', linkText: 'Anthropic 官方 Key 获取'
+        hint: '在服务提供方的后台创建；如需 Anthropic 官方，请添加「Claude」预置。',
+        link: '', linkText: ''
       },
       {
         key: 'baseUrl', label: 'API 地址', placeholder: 'https://api.anthropic.com（留空用官方）', secret: false, optional: true,

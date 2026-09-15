@@ -15,7 +15,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { settingsStore } from '../services/SettingsStore';
 import { devLogStore } from '../services/DevLogStore';
 
-export const APP_VERSION: string = 'v1.0.3';
+export const APP_VERSION: string = 'v1.0.4';
 
 /** 开发者/运营者名称：须与 AppGallery Connect 上提交的开发者名称保持一致（审核要求） */
 export const DEVELOPER_NAME: string = '鸿译开发团队';
@@ -31,9 +31,18 @@ interface UpdateEntry {
 
 const UPDATE_LOG: UpdateEntry[] = [
   {
+    version: 'v1.0.4',
+    date: '2026-09-15',
+    current: true,
+    items: [
+      '新增 AI 服务商：小米 MiMo、OpenAI 官方，均为 OpenAI 兼容协议官方预置',
+      '「OpenAI 兼容服务」「Anthropic 兼容服务」配置页不再显示官方 Key 获取链接（兼容服务的 Key 请向服务提供方获取）'
+    ]
+  },
+  {
     version: 'v1.0.3',
     date: '2026-09-14',
-    current: true,
+    current: false,
     items: [
       '新增语言：内置印尼语、德顿语；语言选择器支持插件声明的扩展语言（粤语、文言文等）',
       '新增插件备份：备份可选携带已安装插件（含配置与密钥），换机恢复免重新导入',
@@ -190,7 +199,7 @@ const PRIVACY_SECTIONS: PrivacySection[] = [
         sensitive: false
       },
       {
-        text: '免费通道：微软翻译、有道翻译；您自行配置的服务商：腾讯云、阿里云、百度翻译、Azure、彩云科技、小牛翻译等；AI 服务商：DeepSeek、智谱 GLM、通义千问、Kimi、Anthropic 等兼容 OpenAI 或 Anthropic 协议的服务商。',
+        text: '免费通道：微软翻译、有道翻译；您自行配置的服务商：腾讯云、阿里云、百度翻译、Azure、彩云科技、小牛翻译等；AI 服务商：DeepSeek、智谱 GLM、通义千问、Kimi、小米 MiMo、OpenAI、Anthropic 等兼容 OpenAI 或 Anthropic 协议的服务商。',
         sensitive: false
       },
       {

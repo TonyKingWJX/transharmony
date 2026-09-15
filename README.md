@@ -4,7 +4,7 @@
 >
 > 项目代号「鸿译」为占位名，正式名称待定（见「待决策清单」）。
 
-**当前状态：v1.0.2，功能开发完成（含 Bob + manggo 插件系统），真机可跑，待上架准备（商店素材、AGC 配置）。** 详见「11. 工程现状」与「12. 版本历史」。
+**当前状态：v1.0.4，功能开发完成（含 Bob + manggo 插件系统），真机可跑，待上架准备（商店素材、AGC 配置）。** 详见「11. 工程现状」与「12. 版本历史」。
 
 ---
 
@@ -184,7 +184,7 @@ interface TranslatorAdapter {
 | **阿里云机器翻译（alimt）** | 通用版每月 100 万字符免费 | 中（RPC HMAC-SHA1 签名） | **已接入（2026-09-05）**，官方 API，AccessKey 型 BYOK |
 | Azure Translator | F0 层每月 200 万字符 | 低（请求头认证） | 已接入，100+ 语言覆盖最广（引擎面板可选） |
 | 百度翻译开放平台 | 标准版免费（QPS=1 严格） | 低（MD5 签名） | 备用引擎（引擎面板可选） |
-| DeepSeek / GLM / 通义 | 无免费额度，但极便宜 | 低（OpenAI 兼容格式） | BYOK 首批支持 |
+| DeepSeek / GLM / 通义 / Kimi / 小米 MiMo / OpenAI | 无免费额度，按 token 计费 | 低（OpenAI 兼容格式） | BYOK 预置支持 |
 
 详细调研（签名方式、语言覆盖、合规注意）见 [docs/translation-providers.md](docs/translation-providers.md)。
 > ⚠️ 价格与免费额度随时变动，接入前以各官网最新政策为准。
@@ -233,7 +233,7 @@ interface TranslatorAdapter {
 
 ```
 harmony-translator/
-├── AppScope/                    # 应用级配置（bundleName、应用名「鸿译」、版本 1.0.0）
+├── AppScope/                    # 应用级配置（bundleName、应用名「鸿译」、版本 1.0.4）
 ├── build-profile.json5          # 工程级构建配置（compatible/target 6.1.1(24)，编译用 DevEco 内置 SDK）
 ├── hvigor/hvigor-config.json5   # 构建工具版本（hvigor 6.26.4, modelVersion 26.0.0）
 ├── docs/
@@ -274,7 +274,7 @@ UI (TranslatePage)
 
 ---
 
-## 11. 工程现状（截至 2026-09-13，v1.0.2）
+## 11. 工程现状（截至 2026-09-15，v1.0.4）
 
 ### 11.1 已实现 ✅
 
@@ -301,12 +301,12 @@ UI (TranslatePage)
 - ✅ **引擎卡死看门狗**：非流式 60s 总上限 / 流式 30s 无增量判死；聚合逐引擎 60s；测试连通不永久转圈；转圈中切换引擎即刻作废旧轮次并用新引擎重翻
 - ✅ **真实验证**：free-pack（5 翻译服务含有道词典流式/MD5 签名）与百炼（翻译+OCR，双服务独立配置）导入即用；Bob 插件全量回归通过
 
-**翻译引擎（12 个适配器：2 个免费通道开箱即翻 + 7 家 BYOK 传统 API + 2 类 AI 格式 / 7 个 AI 预置）**
+**翻译引擎（12 个适配器：2 个免费通道开箱即翻 + 7 家 BYOK 传统 API + 2 类 AI 格式 / 9 个 AI 预置）**
 - ✅ `EdgeTranslatorAdapter` — **微软 Bing 免费通道（默认引擎）**：页面抓 token（缓存 30 分钟自动刷新）；已修 HTTP/2 下 411 问题（强制 HTTP/1.1），真机验证可用
 - ✅ `YoudaoAdapter` — **有道免费通道**，无签名开箱即翻，真机验证可用
 - ✅ `TencentAdapter`（腾讯云 TMT，TC3 签名）/ `AliyunAdapter`（阿里云，HMAC-SHA1）/ `BaiduAdapter`（MD5）/ `AzureAdapter`（请求头认证）/ `YoudaoZhiyunAdapter`（智云签名）/ `CaiyunAdapter`（彩云）/ `NiutransAdapter`（小牛）
 - ✅ `AlibabaAdapter` — 阿里网页通道**暂缓**（x5sec 风控端侧无法稳定通过，代码保留）；火山引擎适配器已移除（2026-09-10）
-- ✅ AI：`OpenAICompatAdapter`（DeepSeek/GLM/通义/Kimi 预置 + 任意 OpenAI 兼容自定义）+ `AnthropicAdapter`（Anthropic 协议预置 + 兼容自定义）；支持自定义 API 地址、模型名（**自动获取模型列表，Select 下拉选择**）、自定义翻译 Prompt
+- ✅ AI：`OpenAICompatAdapter`（DeepSeek/GLM/通义/Kimi/小米 MiMo/OpenAI 官方预置 + 任意 OpenAI 兼容自定义）+ `AnthropicAdapter`（Anthropic 协议预置 + 兼容自定义）；支持自定义 API 地址、模型名（**自动获取模型列表，Select 下拉选择**）、自定义翻译 Prompt
 - ✅ **连通测试**：配置页填好凭证一键试译验证，无需先保存
 
 **核心功能**
@@ -375,6 +375,11 @@ UI (TranslatePage)
 
 ## 12. 版本历史
 
+### v1.0.4（2026-09-15，真机迭代中）
+- **新增 AI 服务商**：小米 MiMo（官方 OpenAI 兼容端点，默认模型 mimo-v2.5-pro）与 OpenAI 官方，均插入 Kimi 之后，走现有 OpenAI 兼容适配器零新增代码；配置页支持自动获取模型列表切换
+- **兼容服务配置页去官方引导**：「OpenAI 兼容服务」「Anthropic 兼容服务」不再显示官方 Key 获取链接，改为引导向服务提供方获取 Key 或直接添加对应官方预置
+- 隐私政策第三方服务商清单补充小米 MiMo、OpenAI
+
 ### v1.0.3（2026-09-14，真机迭代中）
 - **备份/恢复增强**：备份密码改为可选（无密码备份不加密仅保完整性，弹窗醒目警示；恢复端免输密码）；新增可选「包含已安装插件」（插件文件+配置+凭证随备份携带，恢复免重新导入，先于服务恢复自动点亮引擎行）；备份格式升级 THBK2（flags 标记密码位，旧 THBK1 备份完全兼容）；图片原图不再随备份携带（跨设备恢复详情页回退 meta 内嵌缩略图）
 - **内置新增印尼语/德顿语**：语言表扩展至 12 种；引擎分级声明支持（AI 引擎全支持，微软通道支持印尼语，其余云引擎维持核心 10 语言待逐家验证）；选择器动态扩展落地（插件声明语言可达）
@@ -427,4 +432,4 @@ UI (TranslatePage)
 
 ---
 
-*最后更新：2026-09-11 · 项目状态：v1.0.0 功能开发完成，真机验证通过，待上架准备（凭证加密、商店素材、AGC 配置）*
+*最后更新：2026-09-15 · 项目状态：v1.0.4 功能开发完成，真机验证通过，待上架准备（商店素材、AGC 配置）*
