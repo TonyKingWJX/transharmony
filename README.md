@@ -1,10 +1,12 @@
 # 鸿译 TransHarmony
 
-<p align="center">
-  <img src="docs/screenshots/translate.jpg" width="270" alt="翻译主页" />
-  <img src="docs/screenshots/history.jpg" width="270" alt="历史记录" />
-  <img src="docs/screenshots/plugins.jpg" width="270" alt="插件服务" />
-</p>
+| 聚合翻译 | 语言选择 | 历史记录 |
+|---|---|---|
+| ![聚合翻译](docs/screenshots/translate.jpg) | ![语言选择](docs/screenshots/translate-language-picker.jpg) | ![历史记录](docs/screenshots/history.jpg) |
+
+| 我的 | 添加服务商 · 传统引擎 | 添加服务商 · AI 引擎 | 插件服务 |
+|---|---|---|---|
+| ![我的](docs/screenshots/settings.jpg) | ![添加服务商·传统引擎](docs/screenshots/providers-traditional.jpg) | ![添加服务商·AI 引擎](docs/screenshots/providers-ai.jpg) | ![插件服务](docs/screenshots/plugins.jpg) |
 
 鸿蒙（HarmonyOS NEXT）原生翻译应用：**基础翻译永久免费、无广告**，多引擎即切即比，支持 BYOK 接入 AI 大模型与插件生态，数据全部留在本机。
 
