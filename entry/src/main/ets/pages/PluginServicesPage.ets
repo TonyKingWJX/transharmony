@@ -418,7 +418,8 @@ export struct PluginServicesPage {
               .color($r('app.color.divider'))
               .strokeWidth(0.8)
           }
-        }, (rec: InstalledPlugin) => rec.pluginId + '_' + rec.version)
+        }, (rec: InstalledPlugin) => rec.pluginId + '_' + rec.version + '_'
+          + this.displayName(rec) + (this.isEnabled(rec) ? '_1' : '_0'))
       }
       .width('100%')
       .borderRadius(16)

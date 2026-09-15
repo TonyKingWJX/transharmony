@@ -116,6 +116,47 @@ export async function getJson(options: PostOptions): Promise<RawResponse> {
   }
 }
 
+export interface BinaryResponse {
+  /** HTTP 状态码 */
+  status: number;
+  /** 响应体原始字节（音频等二进制内容） */
+  bytes: Uint8Array;
+  /** 响应头（小写键名） */
+  headers: Record<string, string>;
+}
+
+/**
+ * 二进制响应 POST（云端 TTS 音频下载等）：expectDataType 设为 ARRAY_BUFFER，
+ * 响应体按字节返回；非 2xx 时错误体按文本尽力转可读信息抛 NetworkError。
+ */
+export async function postBinary(options: PostOptions): Promise<BinaryResponse> {
+  const client = http.createHttp();
+  try {
+    const resp = await client.request(options.url, {
+      method: http.RequestMethod.POST,
+      header: options.headers,
+      extraData: options.body,
+      expectDataType: http.HttpDataType.ARRAY_BUFFER,
+      connectTimeout: options.timeoutMs ?? 60000,
+      readTimeout: options.timeoutMs ?? 60000
+    });
+    const headers = normalizeHeaders(resp.header);
+    const bytes = new Uint8Array(resp.result as ArrayBuffer);
+    if (!options.allowHttpError && (resp.responseCode < 200 || resp.responseCode >= 300)) {
+      let msg = 'HTTP ' + resp.responseCode;
+      try {
+        msg += ': ' + decoder.decodeToString(bytes);
+      } catch (e) {
+        // 二进制体转文本失败时只报状态码
+      }
+      throw new NetworkError(resp.responseCode, truncate(msg, 300), headers);
+    }
+    return { status: resp.responseCode, bytes: bytes, headers: headers };
+  } finally {
+    client.destroy();
+  }
+}
+
 export function truncate(s: string, max: number): string {
   return s.length > max ? s.substring(0, max) + '...' : s;
 }

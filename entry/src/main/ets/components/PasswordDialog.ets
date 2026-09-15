@@ -21,7 +21,8 @@ export struct PasswordDialog {
   onConfirm: (password: string, includePlugins: boolean) => void = (p: string, i: boolean): void => {
   };
   @State password: string = '';
-  @State includePlugins: boolean = false;
+  /** 备份全局化（v1.0.5）：插件默认包含，可取消勾选 */
+  @State includePlugins: boolean = true;
 
   private canConfirm(): boolean {
     if (this.passwordOptional) {

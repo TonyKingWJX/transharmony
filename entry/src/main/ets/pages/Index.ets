@@ -22,6 +22,7 @@ import { HistoryDetailPage, HistoryDetailParam } from './HistoryDetailPage';
 import { PluginLabPage } from './PluginLabPage';
 import { PluginServicesPage } from './PluginServicesPage';
 import { PluginConfigPage } from './PluginConfigPage';
+import { CloudServicesPage } from './CloudServicesPage';
 import { HISTORY_VERSION_KEY } from '../services/HistoryStore';
 
 /** 路由表：navDestination 要求 @Builder 函数引用（官方约束，不能用行内 lambda） */
@@ -34,7 +35,14 @@ function PageMap(name: string, param: object) {
   } else if (name === 'OfflineTranslatePage') {
     OfflineTranslatePage()
   } else if (name === 'ServiceConfigPage') {
-    ServiceConfigPage({ serviceId: (param as Record<string, string>)['serviceId'] })
+    ServiceConfigPage({
+      serviceId: (param as Record<string, string>)['serviceId'],
+      list: (param as Record<string, string>)['list'] ?? 'translate'
+    })
+  } else if (name === 'TtsServicesPage') {
+    CloudServicesPage({ pageKind: 'tts' })
+  } else if (name === 'OcrServicesPage') {
+    CloudServicesPage({ pageKind: 'ocr' })
   } else if (name === 'PrivacyPage') {
     PrivacyPage()
   } else if (name === 'AboutPage') {

@@ -128,7 +128,7 @@ export class SettingsStore {
   }
 
   async setServices(list: ServiceItem[]): Promise<void> {
-    const arr = await this.serializeList(list);
+    const arr = await this.serializeList(list, 'translate');
     await this.put('services_list', JSON.stringify(arr));
   }
 
@@ -136,11 +136,15 @@ export class SettingsStore {
    * 序列化服务列表：secret 字段（ConfigField.secret = true）写 ASSET 并从 JSON 剥离，
    * 非敏感字段（baseUrl/model/region 等）落 Preferences；值清空时删除对应资产；
    * 已删除实例的孤儿资产一并清理。
+   * kind：'translate' | 'tts' | 'ocr'——三个列表同构独立存储；孤儿清理只针对本列表，
+   * 另两个列表仍在使用的资产别名必须并入存活集合（否则保存任一列表会误删其他列表的密钥）。
    */
-  private async serializeList(list: ServiceItem[]): Promise<SerializedService[]> {
+  private async serializeList(list: ServiceItem[], kind: string): Promise<SerializedService[]> {
     const arr: SerializedService[] = [];
     const alive = new Set<string>();
-    for (const s of this.grouped(list)) {
+    // 翻译列表按「传统在前、AI 在后」归并；TTS/OCR 列表保持原序（组内顺序即展示顺序）
+    const ordered = kind === 'translate' ? this.grouped(list) : list;
+    for (const s of ordered) {
       // Bob 插件实例（无 ProviderDef）：secret 字段由插件配置页直存 ASSET（别名前缀=实例id）。
       // 全部标记存活，避免孤儿清理误删；插件卸载时由插件服务页显式清理。
       if (s.defId.startsWith('plugin:')) {
@@ -172,6 +176,16 @@ export class SettingsStore {
           out[k] = v;
         }
       }
+      // 密钥字段在 config 中缺失（如恢复缺密钥的旧版/异常备份的载荷）：
+      // 保留 ASSET 现值不清除——config 里"没有该字段"≠"用户清空了密钥"（用户清空是空串），
+      // 防止恢复操作把本机仍在使用的密钥误删（对应"恢复后密钥丢失"类问题）。
+      if (def !== undefined) {
+        for (const f of def.fields) {
+          if (f.secret && s.config[f.key] === undefined) {
+            alive.add(this.credAlias(s.id, f.key));
+          }
+        }
+      }
       const rec: SerializedService = {
         id: s.id,
         defId: s.defId,
@@ -184,7 +198,15 @@ export class SettingsStore {
       }
       arr.push(rec);
     }
-    // 已删除实例的孤儿资产清理
+    // 已删除实例的孤儿资产清理（只清本列表孤儿；其他两个列表的存活别名先并入）
+    const foreign: ServiceItem[][] = kind === 'translate'
+      ? [this.getTtsServices(), this.getOcrServices()]
+      : (kind === 'tts'
+        ? [this.getServices(), this.getOcrServices()]
+        : [this.getServices(), this.getTtsServices()]);
+    for (const items of foreign) {
+      this.markForeignAliases(alive, items);
+    }
     for (const alias of Array.from(this.vault.keys())) {
       if (!alive.has(alias)) {
         AssetVault.remove(alias);
@@ -194,13 +216,47 @@ export class SettingsStore {
     return arr;
   }
 
+  /** 把其他服务列表仍在使用的密钥资产别名并入存活集合（列表间互不误删） */
+  private markForeignAliases(alive: Set<string>, items: ServiceItem[]): void {
+    for (const s of items) {
+      const def = findDef(s.defId);
+      if (def === undefined) {
+        // 无目录定义（插件实例）：别名前缀 = 实例id，全部视为存活
+        const prefix = s.id + '_';
+        for (const alias of Array.from(this.vault.keys())) {
+          if (alias.startsWith(prefix)) {
+            alive.add(alias);
+          }
+        }
+        continue;
+      }
+      for (const f of def.fields) {
+        if (!f.secret) {
+          continue;
+        }
+        if ((s.config[f.key] ?? '').length > 0) {
+          alive.add(this.credAlias(s.id, f.key));
+        }
+      }
+    }
+  }
+
   /**
-   * 密钥上 ASSET（启动时一次性）：
-   * services_list JSON 中仍含明文的 secret 字段（升级/恢复场景）搬入 ASSET 并从 JSON 剥离；
+   * 密钥上 ASSET（启动时一次性）：翻译/TTS/OCR 三个服务列表统一处理。
+   * 各列表 JSON 中仍含明文的 secret 字段（升级/恢复场景）搬入 ASSET 并从 JSON 剥离；
    * JSON 中无明文的（新装机/已迁移）从 ASSET 回填内存缓存。
+   * 缓存必须覆盖全部三个列表——只扫翻译列表时，重启后 OCR/TTS 实例的密钥读不进缓存，
+   * parseList 返回空值（表现为密钥丢失），且此后任何一次保存都会把 ASSET 密钥误删。
    */
   private async loadVault(): Promise<void> {
-    const raw = this.pref?.getSync('services_list', '') as string;
+    await this.loadVaultForList('services_list');
+    await this.loadVaultForList('tts_services_list');
+    await this.loadVaultForList('ocr_services_list');
+  }
+
+  /** 单个服务列表的密钥迁移与 ASSET 回填（listKey 同时是写回键） */
+  private async loadVaultForList(listKey: string): Promise<void> {
+    const raw = this.pref?.getSync(listKey, '') as string;
     if (raw === undefined || raw.length === 0) {
       return;
     }
@@ -256,7 +312,7 @@ export class SettingsStore {
       }
     }
     if (dirty && this.pref !== null) {
-      this.pref.putSync('services_list', JSON.stringify(items));
+      this.pref.putSync(listKey, JSON.stringify(items));
       this.pref.flush();
     }
   }
@@ -336,6 +392,61 @@ export class SettingsStore {
     list.splice(from, 1);
     list.splice(to, 0, moved);
     await this.setServices(list);
+  }
+
+  // ---- 语音服务 TTS / 文字识别 OCR 服务实例列表（v1.0.5）----
+  // 与翻译 services_list 同构（ServiceItem + ASSET 密钥），但独立键独立存取：
+  // 翻译分组/聚合/引擎注册只读 services_list，OCR/TTS 实例对翻译链路完全不可见。
+
+  getTtsServices(): ServiceItem[] {
+    return this.parseList(this.pref?.getSync('tts_services_list', '') as string);
+  }
+
+  async setTtsServices(list: ServiceItem[]): Promise<void> {
+    await this.put('tts_services_list', JSON.stringify(await this.serializeList(list, 'tts')));
+  }
+
+  getOcrServices(): ServiceItem[] {
+    return this.parseList(this.pref?.getSync('ocr_services_list', '') as string);
+  }
+
+  async setOcrServices(list: ServiceItem[]): Promise<void> {
+    await this.put('ocr_services_list', JSON.stringify(await this.serializeList(list, 'ocr')));
+  }
+
+  /** 查单个 TTS/OCR 实例（运行时分发用：SpeechService/OcrEngine/TtsEngine） */
+  getTtsService(id: string): ServiceItem | undefined {
+    return this.getTtsServices().find((s: ServiceItem): boolean => s.id === id);
+  }
+
+  getOcrService(id: string): ServiceItem | undefined {
+    return this.getOcrServices().find((s: ServiceItem): boolean => s.id === id);
+  }
+
+  /** 按列表类别取实例列表：'translate' | 'tts' | 'ocr'（配置页/管理页通用） */
+  getServiceList(kind: string): ServiceItem[] {
+    if (kind === 'tts') {
+      return this.getTtsServices();
+    }
+    if (kind === 'ocr') {
+      return this.getOcrServices();
+    }
+    return this.getServices();
+  }
+
+  async setServiceList(kind: string, list: ServiceItem[]): Promise<void> {
+    if (kind === 'tts') {
+      await this.setTtsServices(list);
+    } else if (kind === 'ocr') {
+      await this.setOcrServices(list);
+    } else {
+      await this.setServices(list);
+    }
+  }
+
+  /** 按列表类别查单个实例（翻译列表沿用 getService） */
+  getServiceIn(kind: string, id: string): ServiceItem | undefined {
+    return this.getServiceList(kind).find((s: ServiceItem): boolean => s.id === id);
   }
 
   // ---- 引擎行顺序（翻译页 chip 行，含免费通道）----

@@ -13,15 +13,16 @@ import { PILL_VERSION_KEY } from '../components/EngineSelector';
 
 /**
  * 本地备份与恢复：
- * - 备份内容：全部历史记录（含回收站）+ 服务商配置（含密钥）+ 偏好设置 + 可选的已安装插件
+ * - 备份内容（全局）：全部历史记录（含回收站）+ 服务商配置（翻译/TTS/OCR 三列表，含密钥）
+ *   + 偏好设置（引擎/语言/深色模式/免费通道/TTS·OCR 服务选择/离线翻译开关）+ 已安装插件
  *   （文件/凭证/选项，见 PluginInstaller.collectForBackup），打包 JSON 后以 AES-256-GCM 整包加密。
  * - 密码可选（v2）：THBK2 头 flags 标记是否密码加密；有密码 PBKDF2 派生密钥，无密码用固定
  *   应用常量派生（格式统一、仅保完整性，等效明文，UI 弹窗已醒目警示）。
- * - 兼容：THBK1（v1，必密码）旧备份文件可正常恢复。
+ * - 兼容：THBK1（v1，必密码）旧备份文件可正常恢复；旧备份缺少的新字段恢复时保留本机现值。
  * - 备份位置：系统 DOWNLOAD 模式自动创建的 Download/<包名>/ 目录（免选择界面、
  *   免权限、返回 URI 自带持久化权限）。文件名：鸿译备份_时间.htrans。
  * - 恢复：DocumentViewPicker 拉起系统文件管理器选文件；无密码文件免输密码，有密码文件输入
- *   密码解密，历史可选「合并（按 原文+译文+时间 去重）/覆盖」，服务商与偏好整体替换，
+ *   密码解密，历史可选「合并（按 原文+译文+时间 去重）/覆盖」，服务与偏好整体替换，
  *   插件先于服务恢复（ServiceItem 引用插件记录）。
  *
  * 安全说明：官方文档注明 DOWNLOAD 目录无访问隔离——有密码时凭 AES-GCM 认证加密保护；
@@ -66,6 +67,13 @@ interface BackupPrefs {
   builtinEnabled: string[];
   builtinOrder: string[];
   engineChipOrder: string[];
+  /** v1.0.5：语音/文字识别服务选择（可选；旧备份无此字段，恢复时保留本机现值） */
+  ttsEngineId?: string;
+  ocrEngineId?: string;
+  /** v1.0.5：离线翻译开关（可选；旧备份无此字段） */
+  offlineAdded?: boolean;
+  offlineEnabled?: boolean;
+  offlinePackEnabled?: boolean;
 }
 
 /** 备份文件解密后的完整载荷（SettingsPage 确认弹窗用） */
@@ -78,6 +86,9 @@ export interface BackupPayload {
   prefs: BackupPrefs;
   /** v2：已安装插件（可选携带，勾选「包含已安装插件」时存在）；v1 旧备份无此字段 */
   plugins?: PluginBackup[];
+  /** v1.0.5：语音服务 TTS / 文字识别 OCR 实例（可选；旧备份无此字段，恢复时保留本机现值） */
+  ttsServices?: ServiceItem[];
+  ocrServices?: ServiceItem[];
 }
 
 /** 备份头信息（选文件后判定是否需要输密码） */
@@ -289,6 +300,8 @@ export class BackupService {
       exportedAt: now,
       history: rows,
       services: settingsStore.getServices(),
+      ttsServices: settingsStore.getTtsServices(),
+      ocrServices: settingsStore.getOcrServices(),
       prefs: {
         engineId: settingsStore.getEngineId(),
         colorMode: settingsStore.getColorModePref(),
@@ -298,7 +311,12 @@ export class BackupService {
         builtinAdded: settingsStore.getBuiltinAdded(),
         builtinEnabled: settingsStore.getBuiltinEnabled(),
         builtinOrder: settingsStore.getBuiltinOrder(),
-        engineChipOrder: settingsStore.getEngineChipOrder()
+        engineChipOrder: settingsStore.getEngineChipOrder(),
+        ttsEngineId: settingsStore.getTtsEngineId(),
+        ocrEngineId: settingsStore.getOcrEngineId(),
+        offlineAdded: settingsStore.getOfflineAdded(),
+        offlineEnabled: settingsStore.getOfflineEnabled(),
+        offlinePackEnabled: settingsStore.getOfflinePackEnabled()
       }
     };
     if (includePlugins) {
@@ -376,6 +394,12 @@ export class BackupService {
     let text = '备份时间 ' + d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate())
       + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes())
       + ' · 历史 ' + payload.history.length + ' 条 · 服务商 ' + payload.services.length + ' 个';
+    if (payload.ttsServices !== undefined && payload.ttsServices.length > 0) {
+      text += ' · 语音 ' + payload.ttsServices.length + ' 个';
+    }
+    if (payload.ocrServices !== undefined && payload.ocrServices.length > 0) {
+      text += ' · 识别 ' + payload.ocrServices.length + ' 个';
+    }
     if (payload.plugins !== undefined && payload.plugins.length > 0) {
       text += ' · 插件 ' + payload.plugins.length + ' 个';
     }
@@ -448,8 +472,14 @@ export class BackupService {
     }
 
     try {
-      // 服务商与偏好整体替换
+      // 服务商与偏好整体替换（旧备份无 TTS/OCR 列表字段 → 保留本机现值）
       await settingsStore.setServices(payload.services);
+      if (payload.ttsServices !== undefined) {
+        await settingsStore.setTtsServices(payload.ttsServices);
+      }
+      if (payload.ocrServices !== undefined) {
+        await settingsStore.setOcrServices(payload.ocrServices);
+      }
       const p = payload.prefs;
       await settingsStore.setEngineId(p.engineId);
       await settingsStore.setColorModePref(p.colorMode);
@@ -460,6 +490,22 @@ export class BackupService {
       await settingsStore.setBuiltinEnabled(p.builtinEnabled);
       await settingsStore.setBuiltinOrder(p.builtinOrder);
       await settingsStore.setEngineChipOrder(p.engineChipOrder);
+      // v1.0.5 新增：旧备份无这些字段时保留本机现值
+      if (p.ttsEngineId !== undefined) {
+        await settingsStore.setTtsEngineId(p.ttsEngineId);
+      }
+      if (p.ocrEngineId !== undefined) {
+        await settingsStore.setOcrEngineId(p.ocrEngineId);
+      }
+      if (p.offlineAdded !== undefined) {
+        await settingsStore.setOfflineAdded(p.offlineAdded);
+      }
+      if (p.offlineEnabled !== undefined) {
+        await settingsStore.setOfflineEnabled(p.offlineEnabled);
+      }
+      if (p.offlinePackEnabled !== undefined) {
+        await settingsStore.setOfflinePackEnabled(p.offlinePackEnabled);
+      }
     } catch (e) {
       devLogStore.append('error', 'backup', '恢复失败于偏好阶段：' + ((e instanceof Error) ? e.message : String(e)));
       throw new Error('偏好恢复阶段：' + ((e instanceof Error) ? e.message : String(e)));

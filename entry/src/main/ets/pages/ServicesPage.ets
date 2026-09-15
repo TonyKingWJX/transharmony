@@ -2,6 +2,8 @@
  * 「翻译服务」一级页（NavDestination，自定义标题栏 + 手动避让状态栏）：
  *  - 翻译服务：进入服务商管理页（免费服务商添加/排序/开关/删除 + 用户服务商管理）
  *  - 离线翻译：进入离线翻译管理页（总开关 + 内置中英语言包开关）
+ *  - 语音服务TTS：云端语音合成实例管理页（OpenAI /audio/speech 形状，偏好设置中选择生效）
+ *  - 文字识别服务OCR：云端 OCR 实例管理页（传统 OCR + AI 视觉，拍照翻译时生效）
  *  - 插件服务：Bob 插件管理页（.bobplugin 导入 / 开关 / 删除，翻译类）
  */
 
@@ -142,7 +144,89 @@ export struct ServicesPage {
                 })
               }
 
-              // ── 子项 3：插件服务（Bob 插件导入/开关/删除） ──
+              // ── 子项 3：语音服务 TTS（云端语音合成实例管理；偏好设置中选择生效） ──
+              Row({ space: 12 }) {
+                Text('音')
+                  .fontSize(17)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(Color.White)
+                  .width(42)
+                  .height(42)
+                  .textAlign(TextAlign.Center)
+                  .borderRadius(12)
+                  .linearGradient({ angle: 135, colors: [['#FF6900', 0.0], ['#FF9F3D', 1.0]] })
+                Column({ space: 3 }) {
+                  Text('语音服务TTS')
+                    .fontSize(15)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor($r('app.color.font_primary'))
+                  Text('云端语音合成 · 朗读服务配置')
+                    .fontSize(12)
+                    .lineHeight(17)
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .fontColor($r('app.color.font_tertiary'))
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+
+                SymbolGlyph($r('sys.symbol.chevron_right'))
+                  .fontSize(14)
+                  .fontColor([$r('app.color.font_fourth')])
+              }
+              .width('100%')
+              .margin({ top: 12 })
+              .padding(14)
+              .alignItems(VerticalAlign.Center)
+              .borderRadius(16)
+              .backgroundColor($r('app.color.card_bg'))
+              .border({ width: 0.8, color: $r('app.color.divider') })
+              .onClick(() => {
+                this.pathStack.pushPath({ name: 'TtsServicesPage' });
+              })
+
+              // ── 子项 4：文字识别服务 OCR（传统 OCR + AI 视觉实例管理） ──
+              Row({ space: 12 }) {
+                Text('文')
+                  .fontSize(17)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(Color.White)
+                  .width(42)
+                  .height(42)
+                  .textAlign(TextAlign.Center)
+                  .borderRadius(12)
+                  .linearGradient({ angle: 135, colors: [['#00B2A9', 0.0], ['#3ED598', 1.0]] })
+                Column({ space: 3 }) {
+                  Text('文字识别服务OCR')
+                    .fontSize(15)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor($r('app.color.font_primary'))
+                  Text('腾讯 / 百度 OCR · AI 视觉模型')
+                    .fontSize(12)
+                    .lineHeight(17)
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .fontColor($r('app.color.font_tertiary'))
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+
+                SymbolGlyph($r('sys.symbol.chevron_right'))
+                  .fontSize(14)
+                  .fontColor([$r('app.color.font_fourth')])
+              }
+              .width('100%')
+              .margin({ top: 12 })
+              .padding(14)
+              .alignItems(VerticalAlign.Center)
+              .borderRadius(16)
+              .backgroundColor($r('app.color.card_bg'))
+              .border({ width: 0.8, color: $r('app.color.divider') })
+              .onClick(() => {
+                this.pathStack.pushPath({ name: 'OcrServicesPage' });
+              })
+
+              // ── 子项 5：插件服务（Bob 插件导入/开关/删除） ──
               Row({ space: 12 }) {
                 Text('插')
                   .fontSize(17)

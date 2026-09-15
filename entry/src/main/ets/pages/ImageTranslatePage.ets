@@ -15,6 +15,7 @@ import { fileIo as fs } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { PluginOcrEngine } from '../services/plugin/PluginOcrEngine';
+import { OcrEngine } from '../services/OcrEngine';
 import { devLogStore } from '../services/DevLogStore';
 import { splitServiceRef } from '../services/plugin/ManggoTypes';
 import {
@@ -143,7 +144,14 @@ export struct ImageTranslatePage {
       this.toast('正在识别图片文字');
       const ocrEngineId = settingsStore.getOcrEngineId();
       let text = '';
-      if (ocrEngineId.startsWith('plugin-')) {
+      if (ocrEngineId !== 'system' && !ocrEngineId.startsWith('plugin-')
+        && settingsStore.getOcrService(ocrEngineId) !== undefined) {
+        // 云端 OCR 实例（文字识别服务页添加）：PixelMap → JPEG base64 → OcrEngine 分发
+        const packerC = image.createImagePacker();
+        const packedC = await packerC.packToData(pm, { format: 'image/jpeg', quality: 90 });
+        const imageB64C = new util.Base64Helper().encodeToStringSync(new Uint8Array(packedC));
+        text = await OcrEngine.recognize(ocrEngineId, imageB64C);
+      } else if (ocrEngineId.startsWith('plugin-')) {
         const helper = new util.Base64Helper();
         const ocrRef = ocrEngineId.substring('plugin-'.length);
         if (ocrRef.indexOf('#') >= 0) {

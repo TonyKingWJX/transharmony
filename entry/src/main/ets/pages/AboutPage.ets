@@ -15,7 +15,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import { settingsStore } from '../services/SettingsStore';
 import { devLogStore } from '../services/DevLogStore';
 
-export const APP_VERSION: string = 'v1.0.4';
+export const APP_VERSION: string = 'v1.0.5';
 
 /** 开发者/运营者名称：须与 AppGallery Connect 上提交的开发者名称保持一致（审核要求） */
 export const DEVELOPER_NAME: string = '鸿译开发团队';
@@ -31,9 +31,20 @@ interface UpdateEntry {
 
 const UPDATE_LOG: UpdateEntry[] = [
   {
-    version: 'v1.0.4',
+    version: 'v1.0.5',
     date: '2026-09-15',
     current: true,
+    items: [
+      '新增「语音服务TTS」：服务页新增入口，支持小米 MiMo、OpenAI、OpenAI 兼容、Anthropic 兼容云端语音合成，偏好设置中选择生效',
+      '新增「文字识别服务OCR」：支持腾讯OCR、百度OCR 传统服务商与 AI 视觉服务商（自动获取视觉模型），拍照翻译时生效',
+      '服务页新增 TTS/OCR 管理页：分组展示、开关/删除/拖拽排序、连通测试，凭证仅存本机',
+      '备份恢复已包含语音与识别服务配置'
+    ]
+  },
+  {
+    version: 'v1.0.4',
+    date: '2026-09-15',
+    current: false,
     items: [
       '新增 AI 服务商：小米 MiMo、OpenAI 官方，均为 OpenAI 兼容协议官方预置',
       '「OpenAI 兼容服务」「Anthropic 兼容服务」配置页不再显示官方 Key 获取链接（兼容服务的 Key 请向服务提供方获取）'

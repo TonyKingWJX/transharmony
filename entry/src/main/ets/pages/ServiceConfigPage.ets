@@ -13,7 +13,9 @@ import { settingsStore, ServiceItem } from '../services/SettingsStore';
 import { TranslateUseCase } from '../services/TranslateUseCase';
 import { findDef, ProviderDef, ConfigField } from '../services/ProviderCatalog';
 import { defaultPromptText } from '../services/OpenAICompatAdapter';
-import { fetchOpenAiModels, fetchAnthropicModels } from '../utils/AiModelApi';
+import { fetchOpenAiModels, fetchAnthropicModels, fetchVisionModels, ModelListResult } from '../utils/AiModelApi';
+import { OcrEngine } from '../services/OcrEngine';
+import { TtsEngine } from '../services/TtsEngine';
 import { PILL_VERSION_KEY } from '../components/EngineSelector';
 
 @Component
@@ -21,6 +23,8 @@ export struct ServiceConfigPage {
   @Consume('navPathStack') pathStack: NavPathStack;
   /** 路由参数：服务实例 id（Index.PageMap 注入） */
   @Prop serviceId: string = '';
+  /** 路由参数：所属列表 'translate'（默认）| 'ocr' | 'tts'，区分读写哪个存储 */
+  @Prop list: string = 'translate';
   @StorageProp('ux_statusBarH') statusBarH: number = 0;
   @StorageProp('ux_navBarH') navBarH: number = 0;
   @State service: ServiceItem | null = null;
@@ -36,9 +40,11 @@ export struct ServiceConfigPage {
   /** AI：自动获取的模型列表 + 拉取中状态 */
   @State models: string[] = [];
   @State fetchingModels: boolean = false;
+  /** TTS：目录预置音色清单（音色 Select 选项来源；即取即用，无需获取） */
+  @State voices: string[] = [];
 
   aboutToAppear(): void {
-    const s = settingsStore.getService(this.serviceId);
+    const s = settingsStore.getServiceIn(this.list, this.serviceId);
     if (s === undefined) {
       this.getUIContext().getPromptAction().showToast({ message: '未找到该服务' });
       this.pathStack.pop();
@@ -46,6 +52,8 @@ export struct ServiceConfigPage {
     }
     this.service = s;
     this.def = findDef(s.defId) ?? null;
+    // TTS 预置音色清单（目录声明即取即用）
+    this.voices = this.def !== null && this.def.ttsVoices !== undefined ? this.def.ttsVoices : [];
     // 载入已存配置
     const values: Record<string, string> = {};
     for (const k of Object.keys(s.config)) {
@@ -87,15 +95,18 @@ export struct ServiceConfigPage {
         return;
       }
     }
-    const list = settingsStore.getServices();
+    const list = settingsStore.getServiceList(this.list);
     const hit = list.find((s: ServiceItem): boolean => s.id === sid);
     if (hit !== undefined) {
       hit.config = this.values;
       hit.enabled = this.svcEnabled;
       hit.name = this.name.trim().length > 0 ? this.name.trim() : this.def.label;
     }
-    await settingsStore.setServices(list);
-    TranslateUseCase.refreshServices();
+    await settingsStore.setServiceList(this.list, list);
+    // 翻译列表变更需重建引擎；OCR/TTS 列表与翻译引擎无关，只广播偏好选择刷新
+    if (this.list === 'translate') {
+      TranslateUseCase.refreshServices();
+    }
     AppStorage.setOrCreate(PILL_VERSION_KEY, Date.now());
     this.toast('已保存');
     this.pathStack.pop();
@@ -131,8 +142,13 @@ export struct ServiceConfigPage {
     if (this.service === null) {
       return;
     }
-    await settingsStore.removeService(this.service.id);
-    TranslateUseCase.refreshServices();
+    const sid = this.service.id;
+    await settingsStore.setServiceList(
+      this.list,
+      settingsStore.getServiceList(this.list).filter((s: ServiceItem): boolean => s.id !== sid));
+    if (this.list === 'translate') {
+      TranslateUseCase.refreshServices();
+    }
     AppStorage.setOrCreate(PILL_VERSION_KEY, Date.now());
     this.toast('已删除该服务商');
     this.pathStack.pop();
@@ -143,34 +159,54 @@ export struct ServiceConfigPage {
     if (this.service === null) {
       return;
     }
-    await settingsStore.setServiceEnabled(this.service.id, on);
-    TranslateUseCase.refreshServices();
+    const sid = this.service.id;
+    const list = settingsStore.getServiceList(this.list);
+    const hit = list.find((s: ServiceItem): boolean => s.id === sid);
+    if (hit !== undefined) {
+      hit.enabled = on;
+      await settingsStore.setServiceList(this.list, list);
+    }
+    if (this.list === 'translate') {
+      TranslateUseCase.refreshServices();
+    }
     AppStorage.setOrCreate(PILL_VERSION_KEY, Date.now());
   }
 
-  /** 连通测试：用当前表单值即时生效（不必先保存） */
+  /** 连通测试：用当前表单值即时生效（不必先保存）；OCR/TTS 走各自执行器，翻译走翻译管线 */
   private async runTest(): Promise<void> {
     if (this.service === null || this.testing) {
       return;
     }
     const sid = this.service.id;
-    // 表单值即时写回引擎再测（不落盘，保存与否由用户决定）
-    const list = settingsStore.getServices();
+    // 表单值即时写回（不落盘保存与否由用户决定；写入即生效供测试用）
+    const list = settingsStore.getServiceList(this.list);
     const hit = list.find((s: ServiceItem): boolean => s.id === sid);
     if (hit !== undefined) {
       hit.config = this.values;
-      await settingsStore.setServices(list);
-      TranslateUseCase.refreshServices();
+      await settingsStore.setServiceList(this.list, list);
+      if (this.list === 'translate') {
+        TranslateUseCase.refreshServices();
+      }
     }
     this.testing = true;
     this.testResult = '';
-    const r = await TranslateUseCase.testService(sid);
+    if (this.list === 'ocr') {
+      const r = await OcrEngine.testService(sid);
+      this.testOk = r.ok;
+      this.testResult = r.message;
+    } else if (this.list === 'tts') {
+      const r = await TtsEngine.testService(sid);
+      this.testOk = r.ok;
+      this.testResult = r.message;
+    } else {
+      const r = await TranslateUseCase.testService(sid);
+      this.testOk = r.ok;
+      this.testResult = r.message;
+    }
     this.testing = false;
-    this.testOk = r.ok;
-    this.testResult = r.message;
   }
 
-  /** AI：自动获取模型列表（OpenAI / Anthropic 协议） */
+  /** AI：自动获取模型列表（OCR AI 实例过滤为视觉模型，过滤为空时回退全量） */
   private async fetchModels(): Promise<void> {
     if (this.def === null || this.fetchingModels) {
       return;
@@ -179,9 +215,15 @@ export struct ServiceConfigPage {
     const base = (this.values['baseUrl'] ?? '').length > 0
       ? this.values['baseUrl'] : this.def.baseUrl;
     const apiKey = this.values['apiKey'] ?? '';
-    const r = this.def.aiFormat === 'anthropic'
-      ? await fetchAnthropicModels(base, apiKey)
-      : await fetchOpenAiModels(base, apiKey);
+    let r: ModelListResult;
+    if (this.def.kind === 'ocr-ai') {
+      // OCR AI：只要标注「视觉」的模型；白名单无命中时 fetchVisionModels 返回全量（宽松策略）
+      r = await fetchVisionModels(base, apiKey, this.def.aiFormat);
+    } else {
+      r = this.def.aiFormat === 'anthropic'
+        ? await fetchAnthropicModels(base, apiKey)
+        : await fetchOpenAiModels(base, apiKey);
+    }
     this.fetchingModels = false;
     if (r.error.length > 0) {
       this.toast('获取模型失败：' + r.error);
@@ -226,10 +268,71 @@ export struct ServiceConfigPage {
     return cur.length > 0 ? $r('app.color.font_primary') : $r('app.color.font_tertiary');
   }
 
+  /** TTS 音色 Select 选项：目录预置清单（ArkTS 对象字面量须对应显式接口） */
+  private voiceOptions(): SelectOption[] {
+    const opts: SelectOption[] = [];
+    for (const v of this.voices) {
+      const o: SelectOption = { value: v };
+      opts.push(o);
+    }
+    return opts;
+  }
+
+  /** TTS 音色 Select 显示文本：无预置清单引导手填，已有选中值显示当前音色 */
+  private voiceValue(): string {
+    if (this.voices.length === 0) {
+      return '该服务未公开音色列表，请手填';
+    }
+    const cur = this.values['voice'] ?? '';
+    return cur.length > 0 ? cur : '点击选择音色';
+  }
+
+  /** TTS 音色 Select 字色：有选中值时用主色，其余弱化（占位观感） */
+  private voiceFontColor(): ResourceColor {
+    if (this.voices.length === 0) {
+      return $r('app.color.font_tertiary');
+    }
+    const cur = this.values['voice'] ?? '';
+    return cur.length > 0 ? $r('app.color.font_primary') : $r('app.color.font_tertiary');
+  }
+
+  /** TTS 音色手填占位：目录有默认音色时提示默认值 */
+  private voicePlaceholder(): string {
+    if (this.def !== null && this.def.defaultVoice !== undefined && this.def.defaultVoice.length > 0) {
+      return '默认：' + this.def.defaultVoice;
+    }
+    return '音色名（留空使用服务端默认）';
+  }
+
   /** 头部显示名：用户改名实时跟随 */
   private displayName(): string {
     const fallback = this.def !== null ? this.def.label : '服务配置';
     return this.name.trim().length > 0 ? this.name.trim() : fallback;
+  }
+
+  /** 头部类型标签：按列表/类型区分（机器翻译 / AI 大模型 / 传统 OCR / AI 视觉 / 语音合成） */
+  private typeLabel(): string {
+    if (this.def === null) {
+      return '';
+    }
+    if (this.list === 'ocr') {
+      return this.def.kind === 'ocr-trad' ? '传统 OCR' : 'AI 视觉';
+    }
+    if (this.list === 'tts') {
+      return '语音合成';
+    }
+    return this.def.isAI ? 'AI 大模型' : '机器翻译';
+  }
+
+  /** 连通测试小字说明：按列表区分（翻译试译 / OCR 实测识别 / TTS 试合成） */
+  private testHint(): string {
+    if (this.list === 'ocr') {
+      return '用当前填写的凭证实测一次文字识别（内置纯色测试图，无文字属预期），无需先保存';
+    }
+    if (this.list === 'tts') {
+      return '用当前填写的凭证合成一句测试语音（不播放），无需先保存';
+    }
+    return '用当前填写的凭证试译「你好，世界。」→ English，无需先保存';
   }
 
   build() {
@@ -290,7 +393,7 @@ export struct ServiceConfigPage {
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
                   if (this.def !== null) {
-                    Text(this.def.isAI ? 'AI 大模型' : '机器翻译')
+                    Text(this.typeLabel())
                       .fontSize(11)
                       .fontWeight(FontWeight.Medium)
                       .fontColor($r('app.color.brand'))
@@ -372,7 +475,7 @@ export struct ServiceConfigPage {
               }
               .width('100%')
 
-              Text('用当前填写的凭证试译「你好，世界。」→ English，无需先保存')
+              Text(this.testHint())
                 .fontSize(11)
                 .fontColor($r('app.color.font_fourth'))
                 .width('100%')
@@ -558,7 +661,9 @@ export struct ServiceConfigPage {
                       this.values['baseUrl'] = v;
                     })
                   Text(this.def.aiFormat === 'anthropic'
-                    ? '填到域名根（不带 /v1/messages），留空使用默认地址'
+                    ? (this.list === 'tts'
+                      ? '填到域名根（应用自动拼接 /v1/audio/speech），留空使用默认地址'
+                      : '填到域名根（不带 /v1/messages），留空使用默认地址')
                     : 'OpenAI 兼容：填到 /v1 这一级，留空使用默认地址')
                     .fontSize(12)
                     .lineHeight(18)
@@ -631,30 +736,78 @@ export struct ServiceConfigPage {
                 .width('100%')
                 .alignItems(HorizontalAlign.Start)
 
-                // ── 自定义翻译 Prompt ──
-                Column({ space: 6 }) {
-                  Text('翻译 Prompt（可选）')
-                    .fontSize(13)
-                    .fontColor($r('app.color.font_secondary'))
-                    .width('100%')
-                  TextArea({ placeholder: defaultPromptText(), text: this.values['prompt'] ?? '' })
-                    .fontSize(13)
-                    .height(120)
-                    .width('100%')
-                    .borderRadius(12)
-                    .backgroundColor($r('app.color.bg_container'))
-                    .padding(10)
-                    .onChange((v: string): void => {
-                      this.values['prompt'] = v;
-                    })
-                  Text('留空使用内置 Prompt。可用 {target_language} 占位目标语言；未写则自动追加到末尾。')
-                    .fontSize(11)
-                    .lineHeight(16)
-                    .fontColor($r('app.color.font_fourth'))
-                    .width('100%')
+                // ── TTS：音色（预置清单即取即用 + 自定义手填，两者写同一 voice 值） ──
+                if (this.def.kind === 'tts-ai') {
+                  Column({ space: 6 }) {
+                    Text('音色（voice）')
+                      .fontSize(13)
+                      .fontColor($r('app.color.font_secondary'))
+                      .width('100%')
+
+                    // 预置音色下拉（目录声明即取即用，无需获取）；无预置的服务置灰引导手填
+                    Select(this.voiceOptions())
+                      .selected(this.voices.indexOf(this.values['voice'] ?? ''))
+                      .value(this.voiceValue())
+                      .enabled(this.voices.length > 0)
+                      .font({ size: 14 })
+                      .fontColor(this.voiceFontColor())
+                      .optionFont({ size: 13 })
+                      .height(46)
+                      .width('100%')
+                      .borderRadius(12)
+                      .backgroundColor($r('app.color.bg_container'))
+                      .padding({ left: 12, right: 12 })
+                      .onSelect((index: number, text: string) => {
+                        if (index >= 0 && index < this.voices.length) {
+                          this.values['voice'] = this.voices[index];
+                        }
+                      })
+                    TextInput({ placeholder: this.voicePlaceholder(), text: this.values['voice'] ?? '' })
+                      .fontSize(14)
+                      .height(46)
+                      .width('100%')
+                      .borderRadius(12)
+                      .backgroundColor($r('app.color.bg_container'))
+                      .padding({ left: 12, right: 12 })
+                      .onChange((v: string): void => {
+                        this.values['voice'] = v;
+                      })
+                    Text('预置音色即选即用；自定义音色以服务商文档为准，留空使用默认音色。')
+                      .fontSize(11)
+                      .lineHeight(16)
+                      .fontColor($r('app.color.font_fourth'))
+                      .width('100%')
+                  }
+                  .width('100%')
+                  .alignItems(HorizontalAlign.Start)
                 }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
+
+                // ── 自定义翻译 Prompt（仅翻译 AI 实例；OCR/TTS 实例不展示） ──
+                if (this.def.kind === 'ai') {
+                  Column({ space: 6 }) {
+                    Text('翻译 Prompt（可选）')
+                      .fontSize(13)
+                      .fontColor($r('app.color.font_secondary'))
+                      .width('100%')
+                    TextArea({ placeholder: defaultPromptText(), text: this.values['prompt'] ?? '' })
+                      .fontSize(13)
+                      .height(120)
+                      .width('100%')
+                      .borderRadius(12)
+                      .backgroundColor($r('app.color.bg_container'))
+                      .padding(10)
+                      .onChange((v: string): void => {
+                        this.values['prompt'] = v;
+                      })
+                    Text('留空使用内置 Prompt。可用 {target_language} 占位目标语言；未写则自动追加到末尾。')
+                      .fontSize(11)
+                      .lineHeight(16)
+                      .fontColor($r('app.color.font_fourth'))
+                      .width('100%')
+                  }
+                  .width('100%')
+                  .alignItems(HorizontalAlign.Start)
+                }
               }
               .width('100%')
               .padding(14)

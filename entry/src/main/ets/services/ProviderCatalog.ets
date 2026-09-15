@@ -27,7 +27,7 @@ export interface ConfigField {
 }
 
 /** 服务商类别 */
-export type ProviderKind = 'builtin-free' | 'trad' | 'ai';
+export type ProviderKind = 'builtin-free' | 'trad' | 'ai' | 'ocr-trad' | 'ocr-ai' | 'tts-ai';
 
 /** 服务商静态定义 */
 export interface ProviderDef {
@@ -58,6 +58,14 @@ export interface ProviderDef {
   allowBaseUrl: boolean;
   /** 是否允许用户改模型名（AI 引擎允许） */
   allowModel: boolean;
+  /** TTS 服务声明的支持语言（内部码，如 'zh'/'en'）；空/未声明 = 放行全部语种 */
+  ttsLangs?: string[];
+  /** TTS 默认音色（实例未填 voice 时使用；未声明 = 服务端默认） */
+  defaultVoice?: string;
+  /** TTS 合成 API 形状：'speech'（默认，OpenAI /audio/speech 二进制）| 'mimo'（chat/completions，base64 音频在响应 JSON 内） */
+  ttsApi?: string;
+  /** TTS 预置音色清单（配置页音色 Select 选项；未声明 = 该服务未公开音色列表，手填） */
+  ttsVoices?: string[];
 }
 
 /** 内置免费通道（不可配置、不可删除） */
@@ -525,6 +533,208 @@ export function allAddable(): ProviderDef[] {
   return list;
 }
 
+// ---- 文字识别服务 OCR（独立目录：不进翻译添加面板，由 OcrServicesPage 驱动）----
+
+/** OCR 传统服务商（官方 OCR API + BYOK） */
+export const OCR_TRAD_PROVIDERS: ProviderDef[] = [
+  {
+    id: 'tencent-ocr',
+    label: '腾讯OCR',
+    color: '#0A9BFF',
+    badge: '讯',
+    kind: 'ocr-trad',
+    isAI: false,
+    aiFormat: '',
+    baseUrl: 'https://ocr.tencentcloudapi.com',
+    defaultModel: '',
+    subtitle: '通用印刷体识别 · 每月 1000 次免费',
+    note: '腾讯云文字识别 GeneralBasicOCR（通用印刷体识别），每月 1000 次免费额度，超出部分按量计费。凭证与腾讯云其他服务共用同一套访问密钥，请勿外泄。',
+    fields: [
+      {
+        key: 'secretId', label: 'SecretId', placeholder: 'AKID…', secret: false, optional: false,
+        hint: '在腾讯云控制台「访问管理 → API 密钥管理」创建并复制 SecretId。',
+        link: 'https://console.cloud.tencent.com/cam/capi', linkText: '前往腾讯云密钥管理'
+      },
+      {
+        key: 'secretKey', label: 'SecretKey', placeholder: '密钥', secret: true, optional: false,
+        hint: '与 SecretId 配套的密钥，同一页面创建后复制；需先开通文字识别服务。',
+        link: 'https://console.cloud.tencent.com/ocr', linkText: '前往腾讯云文字识别控制台'
+      }
+    ],
+    allowBaseUrl: false,
+    allowModel: false
+  },
+  {
+    id: 'baidu-ocr',
+    label: '百度OCR',
+    color: '#2932E1',
+    badge: '百',
+    kind: 'ocr-trad',
+    isAI: false,
+    aiFormat: '',
+    baseUrl: 'https://aip.baidubce.com',
+    defaultModel: '',
+    subtitle: '通用文字识别标准版 · 每月 1000 次免费',
+    note: '百度智能云通用文字识别（标准版），每月 1000 次免费额度，超出部分按量计费。凭证为千帆平台创建应用后获得的 API Key 与 Secret Key。',
+    fields: [
+      {
+        key: 'apiKey', label: 'API Key', placeholder: 'API Key', secret: false, optional: false,
+        hint: '在百度智能云控制台「应用列表」创建文字识别应用后查看。',
+        link: 'https://console.bce.baidu.com/ai/#/ai/ocr/app/list', linkText: '前往百度智能云控制台'
+      },
+      {
+        key: 'secretKey', label: 'Secret Key', placeholder: 'Secret Key', secret: true, optional: false,
+        hint: '与 API Key 同页显示，创建应用时生成。',
+        link: 'https://console.bce.baidu.com/ai/#/ai/ocr/app/list', linkText: '前往百度智能云控制台'
+      }
+    ],
+    allowBaseUrl: false,
+    allowModel: false
+  }
+];
+
+/**
+ * OCR AI 服务商：程序化从 AI_PROVIDERS 派生（id 加 ocr- 前缀、kind 改 ocr-ai），
+ * 与翻译 AI 目录永不失同步；用于 OCR 时通过视觉（多模态）模型识别图片文字。
+ */
+function deriveOcrAiProviders(): ProviderDef[] {
+  const out: ProviderDef[] = [];
+  for (const p of AI_PROVIDERS) {
+    const q: ProviderDef = {
+      id: 'ocr-' + p.id,
+      label: p.label,
+      color: p.color,
+      badge: p.badge,
+      kind: 'ocr-ai',
+      isAI: p.isAI,
+      aiFormat: p.aiFormat,
+      baseUrl: p.baseUrl,
+      defaultModel: p.defaultModel,
+      subtitle: p.subtitle,
+      note: p.note + '　本实例用于文字识别（OCR）：发送图片给视觉模型提取图中文字，请选择支持视觉/多模态的模型。',
+      fields: p.fields,
+      allowBaseUrl: p.allowBaseUrl,
+      allowModel: p.allowModel
+    };
+    out.push(q);
+  }
+  return out;
+}
+
+/** OCR AI 服务商（视觉模型识别图片文字） */
+export const OCR_AI_PROVIDERS: ProviderDef[] = deriveOcrAiProviders();
+
+// ---- 语音服务 TTS（独立目录：不进翻译添加面板，由 TtsServicesPage 驱动）----
+// 合成协议统一为 OpenAI /audio/speech 形状（模型/文本/音色 → mp3 音频）；
+// Anthropic 兼容仅改变鉴权方式（x-api-key），用于兼容中转站。
+
+/** TTS 服务商（云端语音合成） */
+export const TTS_PROVIDERS: ProviderDef[] = [
+  {
+    id: 'tts-mimo',
+    label: '小米 MiMo',
+    color: '#FF6900',
+    badge: '米',
+    kind: 'tts-ai',
+    isAI: true,
+    aiFormat: 'openai',
+    baseUrl: 'https://api.xiaomimimo.com/v1',
+    defaultModel: 'mimo-v2.5-tts',
+    defaultVoice: 'mimo_default',
+    ttsApi: 'mimo',
+    ttsVoices: ['mimo_default', '冰糖', '茉莉', '苏打', '白桦', 'Mia', 'Chloe', 'Milo', 'Dean'],
+    subtitle: '官方 API · chat 接口音频输出',
+    note: '小米 MiMo 语音合成（官方文档：POST /v1/chat/completions，音频以 base64 随响应返回，非 /audio/speech）。模型可选 mimo-v2.5-tts（预置音色）/ tts-voicedesign（音色设计）/ tts-voiceclone（音色克隆，音色填音频样本 base64）。',
+    fields: [
+      {
+        key: 'apiKey', label: 'API Key', placeholder: 'sk-…', secret: true, optional: false,
+        hint: '在小米 MiMo 开放平台控制台「API Keys」页创建。',
+        link: 'https://platform.xiaomimimo.com/#/console/api-keys', linkText: '前往小米 MiMo 开放平台'
+      }
+    ],
+    allowBaseUrl: true,
+    allowModel: true
+  },
+  {
+    id: 'tts-openai',
+    label: 'OpenAI 官方',
+    color: '#111111',
+    badge: 'O',
+    kind: 'tts-ai',
+    isAI: true,
+    aiFormat: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-4o-mini-tts',
+    defaultVoice: 'alloy',
+    ttsVoices: ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse'],
+    subtitle: '官方 API · TTS 模型',
+    note: 'OpenAI 语音合成（/v1/audio/speech），按字符计费。模型可选 tts-1 / tts-1-hd / gpt-4o-mini-tts；音色 alloy、echo、fable、onyx、nova、shimmer 等。',
+    fields: [
+      {
+        key: 'apiKey', label: 'API Key', placeholder: 'sk-…', secret: true, optional: false,
+        hint: '在 OpenAI 平台「API Keys」页创建。',
+        link: 'https://platform.openai.com/api-keys', linkText: '前往 OpenAI 平台'
+      }
+    ],
+    allowBaseUrl: true,
+    allowModel: true
+  },
+  {
+    id: 'tts-openai-compat',
+    label: 'OpenAI 兼容服务',
+    color: '#10A37F',
+    badge: 'O',
+    kind: 'tts-ai',
+    isAI: true,
+    aiFormat: 'openai',
+    baseUrl: '',
+    defaultModel: '',
+    subtitle: '自定义 API 地址 · /audio/speech',
+    note: '任何兼容 OpenAI /audio/speech 协议的语音合成服务（本地推理、中转站等）。API 地址填写到 /v1 这一级（应用自动拼接 /audio/speech）。',
+    fields: [
+      {
+        key: 'apiKey', label: 'API Key', placeholder: 'sk-…（本地服务可留空）', secret: true, optional: true,
+        hint: '在服务提供方的后台创建；如需 OpenAI 官方，请添加「OpenAI 官方」预置。',
+        link: '', linkText: ''
+      },
+      {
+        key: 'baseUrl', label: 'API 地址', placeholder: 'https://api.example.com/v1', secret: false, optional: false,
+        hint: '填到 /v1 这一级，应用自动拼接 /audio/speech。',
+        link: '', linkText: ''
+      }
+    ],
+    allowBaseUrl: true,
+    allowModel: true
+  },
+  {
+    id: 'tts-anthropic-compat',
+    label: 'Anthropic 兼容服务',
+    color: '#B8926A',
+    badge: 'C',
+    kind: 'tts-ai',
+    isAI: true,
+    aiFormat: 'anthropic',
+    baseUrl: '',
+    defaultModel: '',
+    subtitle: '自定义 API 地址 · 兼容中转',
+    note: '用于兼容中转站的语音合成：请求形状与 OpenAI /audio/speech 一致，鉴权使用 x-api-key 头（Anthropic 风格）。API 地址留空时默认官方域名；官方 Anthropic 暂无 TTS 接口，此项供自建/中转兼容服务使用。',
+    fields: [
+      {
+        key: 'apiKey', label: 'API Key', placeholder: 'sk-ant-…', secret: true, optional: false,
+        hint: '在服务提供方的后台创建；如需 Claude 翻译，请添加「Claude」预置。',
+        link: '', linkText: ''
+      },
+      {
+        key: 'baseUrl', label: 'API 地址', placeholder: 'https://api.example.com（留空用官方域名）', secret: false, optional: true,
+        hint: '填到域名根，应用自动拼接 /v1/audio/speech。',
+        link: '', linkText: ''
+      }
+    ],
+    allowBaseUrl: true,
+    allowModel: true
+  }
+];
+
 export function findDef(id: string): ProviderDef | undefined {
   for (const p of FREE_PROVIDERS) {
     if (p.id === id) {
@@ -537,6 +747,21 @@ export function findDef(id: string): ProviderDef | undefined {
     }
   }
   for (const p of AI_PROVIDERS) {
+    if (p.id === id) {
+      return p;
+    }
+  }
+  for (const p of OCR_TRAD_PROVIDERS) {
+    if (p.id === id) {
+      return p;
+    }
+  }
+  for (const p of OCR_AI_PROVIDERS) {
+    if (p.id === id) {
+      return p;
+    }
+  }
+  for (const p of TTS_PROVIDERS) {
     if (p.id === id) {
       return p;
     }

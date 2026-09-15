@@ -112,9 +112,9 @@ export struct SettingsPageContent {
     AppStorage.setOrCreate('pref_to_lang', this.toLang);
   }
 
-  /** 刷新已安装 TTS/OCR 插件服务选项（仅【已启用】的服务进入 Select；停用即从选项消失）。
+  /** 刷新 TTS/OCR 服务选项：本机添加的云端服务实例（已启用）+ 已启用插件服务。
    *  Bob 单实例（'plugin-<pid>'）；Manggo 逐服务实例（'plugin-<pid>#<sid>'）。
-   *  当前选中的服务若被停用，自动回退系统服务。 */
+   *  当前选中的服务若被停用/删除，自动回退系统服务。 */
   private refreshPluginEngines(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
     PluginInstaller.list(ctx).then((list: InstalledPlugin[]): void => {
@@ -149,21 +149,48 @@ export struct SettingsPageContent {
         }
         return out;
       };
-      this.ttsPlugins = buildOptions('speech', 'tts');
-      this.ocrPlugins = buildOptions('ocr', 'ocr');
-      // 选中项被停用/删除 → 回退系统服务
-      if (this.ttsEngineId.startsWith('plugin-')
+      // 本机添加的云端服务实例（服务管理页添加，已启用才进选项；实例 id 与 'system'/'plugin-' 天然可区分）
+      const nativeTts: PluginEngineOption[] = [];
+      for (const s of settingsStore.getTtsServices()) {
+        if (s.enabled) {
+          nativeTts.push({ engineId: s.id, label: s.name });
+        }
+      }
+      const nativeOcr: PluginEngineOption[] = [];
+      for (const s of settingsStore.getOcrServices()) {
+        if (s.enabled) {
+          nativeOcr.push({ engineId: s.id, label: s.name });
+        }
+      }
+      this.ttsPlugins = nativeTts.concat(buildOptions('speech', 'tts'));
+      this.ocrPlugins = nativeOcr.concat(buildOptions('ocr', 'ocr'));
+      // 选中项被停用/删除（插件或本机实例）→ 回退系统服务
+      if (this.ttsEngineId !== 'system'
         && !this.ttsPlugins.some((o: PluginEngineOption): boolean => o.engineId === this.ttsEngineId)) {
         this.ttsEngineId = 'system';
         settingsStore.setTtsEngineId('system');
       }
-      if (this.ocrEngineId.startsWith('plugin-')
+      if (this.ocrEngineId !== 'system'
         && !this.ocrPlugins.some((o: PluginEngineOption): boolean => o.engineId === this.ocrEngineId)) {
         this.ocrEngineId = 'system';
         settingsStore.setOcrEngineId('system');
       }
     }).catch((e: Object): void => {
-      // 清单读取失败保持空选项（仅系统服务可选）
+      // 清单读取失败保持本机服务选项（插件选项置空，仅系统+本机服务可选）
+      const nativeTts: PluginEngineOption[] = [];
+      for (const s of settingsStore.getTtsServices()) {
+        if (s.enabled) {
+          nativeTts.push({ engineId: s.id, label: s.name });
+        }
+      }
+      const nativeOcr: PluginEngineOption[] = [];
+      for (const s of settingsStore.getOcrServices()) {
+        if (s.enabled) {
+          nativeOcr.push({ engineId: s.id, label: s.name });
+        }
+      }
+      this.ttsPlugins = nativeTts;
+      this.ocrPlugins = nativeOcr;
     });
   }
 
@@ -189,13 +216,15 @@ export struct SettingsPageContent {
   private pickTtsEngine(id: string): void {
     this.ttsEngineId = id;
     settingsStore.setTtsEngineId(id);
-    this.toast(id === 'system' ? '语音服务已设为系统服务' : '语音服务已设为插件');
+    const label = id === 'system' ? '系统服务' : this.serviceSelectedLabel(id, this.ttsPlugins);
+    this.toast('语音服务已设为 ' + label);
   }
 
   private pickOcrEngine(id: string): void {
     this.ocrEngineId = id;
     settingsStore.setOcrEngineId(id);
-    this.toast(id === 'system' ? '文字识别已设为系统服务' : '文字识别已设为插件');
+    const label = id === 'system' ? '系统服务' : this.serviceSelectedLabel(id, this.ocrPlugins);
+    this.toast('文字识别已设为 ' + label);
   }
 
   /** 每次切到「我的」页签都重读偏好：启动瞬间 bootstrap 可能未完成，首帧读值不可靠 */
@@ -420,8 +449,11 @@ export struct SettingsPageContent {
     this.engineId = settingsStore.getEngineId();
     this.fromLang = settingsStore.getFromLang();
     this.toLang = settingsStore.getToLang();
+    this.ttsEngineId = settingsStore.getTtsEngineId();
+    this.ocrEngineId = settingsStore.getOcrEngineId();
     this.ocrSaveGallery = settingsStore.getOcrSaveToGallery();
     this.lastBackupAt = BackupService.lastBackupAt();
+    this.refreshPluginEngines();
     const cm = settingsStore.getColorModePref();
     if (cm !== this.colorModePref) {
       // 值变化才应用：setColorMode 会触发全树按新配色重建（切页签时的怪动画根因）
@@ -695,7 +727,7 @@ export struct SettingsPageContent {
                 Text('立即备份')
                   .fontSize(15)
                   .fontColor($r('app.color.font_primary'))
-                Text('历史与服务商配置（密码可选，可含插件）导出到 Download/鸿译 目录')
+                Text('历史、服务商、语音/识别服务与插件（密码可选）导出到 Download/鸿译 目录')
                   .fontSize(11)
                   .fontColor($r('app.color.font_tertiary'))
               }

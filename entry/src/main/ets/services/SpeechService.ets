@@ -5,8 +5,10 @@ import { util } from '@kit.ArkTS';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { settingsStore } from './SettingsStore';
+import { findDef } from './ProviderCatalog';
 import { devLogStore } from './DevLogStore';
 import { SpeechPlayback, PluginTtsPlayback } from './plugin/PluginTtsPlayback';
+import { TtsEngine } from './TtsEngine';
 import { bobPluginEngine } from './plugin/BobPluginEngine';
 import { splitServiceRef, parseManggoServices, manggoServiceLangs } from './plugin/ManggoTypes';
 
@@ -179,7 +181,7 @@ export class SpeechService {
     SpeechService.appCtx = context;
   }
 
-  /** 当前 TTS 服务是否支持该语言：插件服务按声明（未声明=放行），系统服务仅中英 */
+  /** 当前 TTS 服务是否支持该语言：插件/云端实例按声明（未声明=放行），系统服务仅中英 */
   static isLangSupported(code: string): boolean {
     const ttsEngineId = settingsStore.getTtsEngineId();
     if (ttsEngineId.startsWith('plugin-')) {
@@ -200,6 +202,17 @@ export class SpeechService {
         return declared.length === 0 ? true : declared.includes(normalized);
       }
       return bobPluginEngine.langsOf(ref).includes(normalized);
+    }
+    // 云端 TTS 实例（语音服务页添加）：按目录 ttsLangs 声明判断（未声明放行全部）
+    if (ttsEngineId !== 'system') {
+      const svc = settingsStore.getTtsService(ttsEngineId);
+      const def = svc !== undefined ? findDef(svc.defId) : undefined;
+      const langs = def !== undefined ? def.ttsLangs : undefined;
+      if (langs === undefined || langs.length === 0) {
+        return true;
+      }
+      const normalized2 = code.startsWith('en') ? 'en' : (code.startsWith('zh') ? 'zh' : code);
+      return langs.includes(normalized2);
     }
     return code.startsWith('zh') || code.startsWith('en');
   }
@@ -289,6 +302,27 @@ export class SpeechService {
         return;
       }
       SpeechService.playback = pb;
+      SpeechService.activeChannel = channel;
+      return;
+    }
+
+    // 云端 TTS 实例（语音服务页添加）：/audio/speech 合成 → AVPlayer 播放
+    if (ttsEngineId !== 'system' && settingsStore.getTtsService(ttsEngineId) !== undefined) {
+      if (SpeechService.appCtx === null) {
+        throw new Error('应用尚未初始化完成');
+      }
+      const cloud = await TtsEngine.speak(SpeechService.appCtx, ttsEngineId, text, onStateChange);
+      if (epoch !== SpeechService.speakEpoch) {
+        // 合成期间被停止（页面退出等）：丢弃刚合成的音频，不进入播放
+        try {
+          await cloud.stop();
+        } catch (e) {
+          // 已释放等场景忽略
+        }
+        onStateChange();
+        return;
+      }
+      SpeechService.playback = cloud;
       SpeechService.activeChannel = channel;
       return;
     }
