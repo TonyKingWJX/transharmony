@@ -522,7 +522,7 @@ export struct SettingsPageContent {
               .layoutWeight(1)
 
               SymbolGlyph($r('sys.symbol.chevron_right'))
-                .fontSize(14)
+                .fontSize(16)
                 .fontColor([$r('app.color.font_fourth')])
             }
             .width('100%')
@@ -738,7 +738,7 @@ export struct SettingsPageContent {
                 LoadingProgress().width(20).height(20).color($r('app.color.brand'))
               } else {
                 SymbolGlyph($r('sys.symbol.chevron_right'))
-                  .fontSize(14)
+                  .fontSize(16)
                   .fontColor([$r('app.color.font_fourth')])
               }
             }
@@ -763,7 +763,7 @@ export struct SettingsPageContent {
               .layoutWeight(1)
 
               SymbolGlyph($r('sys.symbol.chevron_right'))
-                .fontSize(14)
+                .fontSize(16)
                 .fontColor([$r('app.color.font_fourth')])
             }
             .width('100%')
@@ -806,7 +806,7 @@ export struct SettingsPageContent {
                 .fontColor($r('app.color.font_primary'))
               Blank()
               SymbolGlyph($r('sys.symbol.chevron_right'))
-                .fontSize(14)
+                .fontSize(16)
                 .fontColor([$r('app.color.font_fourth')])
             }
             .width('100%')
@@ -823,7 +823,7 @@ export struct SettingsPageContent {
                 .fontColor($r('app.color.font_primary'))
               Blank()
               SymbolGlyph($r('sys.symbol.chevron_right'))
-                .fontSize(14)
+                .fontSize(16)
                 .fontColor([$r('app.color.font_fourth')])
             }
             .width('100%')
@@ -843,7 +843,7 @@ export struct SettingsPageContent {
                 .fontSize(11)
                 .fontColor($r('app.color.font_tertiary'))
               SymbolGlyph($r('sys.symbol.chevron_right'))
-                .fontSize(14)
+                .fontSize(16)
                 .fontColor([$r('app.color.font_fourth')])
                 .margin({ left: 6 })
             }

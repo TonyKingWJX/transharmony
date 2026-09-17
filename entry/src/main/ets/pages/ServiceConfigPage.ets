@@ -607,7 +607,7 @@ export struct ServiceConfigPage {
                             .fontWeight(FontWeight.Medium)
                             .fontColor($r('app.color.brand'))
                           SymbolGlyph($r('sys.symbol.chevron_right'))
-                            .fontSize(11)
+                            .fontSize(16)
                             .fontColor([$r('app.color.brand')])
                         }
                         .margin({ top: 2 })

@@ -106,7 +106,7 @@ export struct DeveloperPage {
                 .alignItems(HorizontalAlign.Start)
                 .layoutWeight(1)
                 SymbolGlyph($r('sys.symbol.chevron_right'))
-                  .fontSize(14)
+                  .fontSize(16)
                   .fontColor([$r('app.color.font_fourth')])
               }
               .width('100%')
@@ -156,7 +156,7 @@ export struct DeveloperPage {
                   .fontColor($r('app.color.font_primary'))
                 Blank()
                 SymbolGlyph($r('sys.symbol.chevron_right'))
-                  .fontSize(14)
+                  .fontSize(16)
                   .fontColor([$r('app.color.font_fourth')])
               }
               .width('100%')
@@ -180,7 +180,7 @@ export struct DeveloperPage {
                   .fontColor($r('app.color.font_primary'))
                 Blank()
                 SymbolGlyph($r('sys.symbol.chevron_right'))
-                  .fontSize(14)
+                  .fontSize(16)
                   .fontColor([$r('app.color.font_fourth')])
               }
               .width('100%')
